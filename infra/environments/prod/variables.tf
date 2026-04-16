@@ -1,5 +1,5 @@
-variable "region" {
-  description = "AWS region where resources will be deployed"
+variable "aws_region" {
+  description = "AWS region for the prod environment"
   type        = string
 }
 
@@ -9,41 +9,63 @@ variable "cidr_block" {
 }
 
 variable "public_subnet_cidrs" {
-  description = "List of CIDR blocks for public subnets"
+  description = "List of public subnet CIDR blocks"
   type        = list(string)
 }
 
 variable "private_subnet_cidrs" {
-  description = "List of CIDR blocks for private subnets"
+  description = "List of private subnet CIDR blocks"
   type        = list(string)
 }
 
 variable "azs" {
-  description = "List of availability zones to deploy subnets into"
+  description = "Availability zones to use"
   type        = list(string)
 }
 
 variable "enable_nat_gateway" {
-  description = "Whether to enable NAT Gateway for private subnet internet access"
+  description = "Whether to create NAT gateway(s)"
   type        = bool
 }
 
 variable "nat_gateway_count" {
-  description = "Number of NAT Gateways to create (typically 1 for dev, 1 per AZ for prod)"
+  description = "Number of NAT gateways to create"
   type        = number
 }
 
-variable "tags" {
-  description = "Common tags applied to all resources"
-  type        = map(string)
+variable "cluster_name" {
+  description = "EKS cluster name"
+  type        = string
 }
 
-variable "public_access_cidrs" {
-  description = "Allowed CIDR blocks for EKS API access"
+variable "desired_size" {
+  description = "Desired node group size"
+  type        = number
+}
+
+variable "min_size" {
+  description = "Minimum node group size"
+  type        = number
+}
+
+variable "max_size" {
+  description = "Maximum node group size"
+  type        = number
+}
+
+variable "instance_types" {
+  description = "EC2 instance types for the node group"
   type        = list(string)
 }
 
 variable "enable_root_app" {
-  type    = bool
-  default = false
+  description = "Whether Terraform should create the ArgoCD root Application"
+  type        = bool
+  default     = false
+}
+
+variable "tags" {
+  description = "Common tags to apply to resources"
+  type        = map(string)
+  default     = {}
 }
