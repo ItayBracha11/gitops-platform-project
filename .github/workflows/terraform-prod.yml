@@ -1,0 +1,98 @@
+name: Terraform Prod
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/environments/prod/**'
+      - 'infra/modules/**'
+      - 'gitops/applications/prod/**'
+      - '.github/workflows/terraform-prod.yml'
+  workflow_dispatch:
+
+jobs:
+  infra-prod:
+    name: Prod Infrastructure and ArgoCD Install
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: infra/environments/prod
+
+    env:
+      TF_IN_AUTOMATION: true
+      AWS_REGION: "eu-west-1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Plan
+        run: terraform plan -var-file=prod.tfvars -var="enable_root_app=false"
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -var-file=prod.tfvars -var="enable_root_app=false"
+
+      - name: Commit generated values file
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add ../../../gitops/infrastructure/alb-controller/values-prod.yaml
+          git commit -m "Update prod ALB controller values [skip ci]" || echo "No changes to commit"
+          git push
+
+  bootstrap-prod:
+    name: Prod Root App Bootstrap
+    runs-on: ubuntu-24.04
+    needs: infra-prod
+
+    defaults:
+      run:
+        working-directory: infra/environments/prod
+
+    env:
+      TF_IN_AUTOMATION: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-west-1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -var-file=prod.tfvars -var="enable_root_app=true"

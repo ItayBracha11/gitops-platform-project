@@ -1,0 +1,56 @@
+name: Promote Image to Prod
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'The image tag to promote to prod'
+        required: true
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  PROD_VALUES_FILE: "gitops/apps/demo-app/values-prod.yaml"
+
+jobs:
+  promote:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Validate image exists in ECR
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          aws ecr describe-images \
+            --repository-name "$ECR_REPOSITORY" \
+            --image-ids imageTag="$IMAGE_TAG" \
+            --region "$AWS_REGION" >/dev/null
+
+      - name: Update prod Helm values
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          sed -i "s/tag:.*/tag: $IMAGE_TAG/" $PROD_VALUES_FILE
+
+      - name: Commit changes
+        env:
+          IMAGE_TAG: ${{ github.event.inputs.image_tag }}
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add $PROD_VALUES_FILE
+          git commit -m "Promote prod image to $IMAGE_TAG [skip ci]" || echo "No changes to commit"
+          git push

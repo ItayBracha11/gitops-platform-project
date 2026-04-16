@@ -1,0 +1,25 @@
+replicaCount: 1
+
+image:
+  repository: 111310799979.dkr.ecr.us-east-1.amazonaws.com/gitops-demo-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  port: 80
+  targetPort: 8000
+
+ingress:
+  enabled: true
+  className: alb
+  scheme: internet-facing
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+namespace: demo-app

@@ -1,0 +1,42 @@
+name: Destroy Dev Environment
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: 'Type "DESTROY" to confirm dev environment destruction'
+        required: true
+        type: string
+
+jobs:
+  destroy-dev:
+    name: Terraform Destroy Dev
+    if: ${{ github.event.inputs.confirm_destroy == 'DESTROY' }}
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: infra/environments/dev
+
+    env:
+      TF_IN_AUTOMATION: true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve -var-file=dev.tfvars -var="enable_root_app=true"
