@@ -10,7 +10,7 @@ on:
 
 env:
   AWS_REGION: us-east-1
-  ECR_REPOSITORY: ${{ secrets.ECR_REPOSITORY }}
+  ECR_REPOSITORY: gitops-demo-app
   PROD_VALUES_FILE: "gitops/apps/demo-app/values-prod.yaml"
 
 jobs:
