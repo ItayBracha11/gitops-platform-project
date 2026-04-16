@@ -1,4 +1,4 @@
-name: Terraform Prod
+name: "[Terraform] Apply Prod Infrastructure"
 
 on:
   push:

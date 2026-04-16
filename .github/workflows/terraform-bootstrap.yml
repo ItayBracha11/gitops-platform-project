@@ -1,4 +1,4 @@
-name: Bootstrap Terraform Backend
+name: "[Terraform] Bootstrap Backend"
 
 on:
   workflow_dispatch:

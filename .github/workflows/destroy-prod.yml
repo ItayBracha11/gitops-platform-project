@@ -1,4 +1,4 @@
-name: Destroy Prod Environment
+name: "[Terraform] Destroy Prod Infrastructure"
 
 on:
   workflow_dispatch:

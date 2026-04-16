@@ -1,4 +1,4 @@
-name: Terraform Dev
+name: "[Terraform] Apply Dev Infrastructure"
 
 on:
   push:

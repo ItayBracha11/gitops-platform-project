@@ -1,4 +1,4 @@
-name: Destroy Dev Environment
+name: "[Terraform] Destroy Dev Infrastructure"
 
 on:
   workflow_dispatch:
