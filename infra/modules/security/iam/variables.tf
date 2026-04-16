@@ -1,4 +1,12 @@
 variable "oidc_provider_arn" {
-  description = "IAM OIDC provider ARN for the EKS cluster"
-  type        = string
+  type = string
+}
+
+variable "oidc_provider_url" {
+  type = string
+}
+
+variable "tags" {
+  type    = map(string)
+  default = {}
 }
