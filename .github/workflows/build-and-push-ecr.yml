@@ -1,4 +1,4 @@
-name: [CI] Build and Push Image to ECR
+name: "[CI] Build and Push Image to ECR"
 
 run-name: "[CI] Build Image (${{ github.sha }})"
 
