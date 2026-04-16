@@ -1,4 +1,6 @@
-name: "[CI] Build and Push Image to ECR"
+name: [CI] Build and Push Image to ECR
+
+run-name: "[CI] Build Image (${{ github.sha }})"
 
 on:
   push:
@@ -8,6 +10,9 @@ on:
       - 'app/**'
       - '.github/workflows/build-and-push-ecr.yml'
   workflow_dispatch:
+
+permissions:
+  contents: write   
 
 env:
   AWS_REGION: us-east-1
@@ -20,7 +25,9 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}  # ensures push works
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -33,7 +40,6 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Set image tag
-        id: vars
         run: echo "IMAGE_TAG=${GITHUB_SHA::7}" >> $GITHUB_ENV
 
       - name: Build Docker image
@@ -52,7 +58,7 @@ jobs:
           docker push \
             $ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/$ECR_REPOSITORY:$IMAGE_TAG
 
-      - name: Update Helm values
+      - name: Update dev Helm values
         run: |
           sed -i "s/tag:.*/tag: $IMAGE_TAG/" $DEV_VALUES_FILE
 
@@ -61,5 +67,5 @@ jobs:
           git config --global user.name "github-actions"
           git config --global user.email "github-actions@github.com"
           git add $DEV_VALUES_FILE
-          git commit -m "Update image tag to $IMAGE_TAG [skip ci]" || echo "No changes to commit"
+          git commit -m "Update dev image tag to $IMAGE_TAG [skip ci]" || echo "No changes"
           git push

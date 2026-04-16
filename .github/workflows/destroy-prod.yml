@@ -1,5 +1,7 @@
 name: "[Terraform] Destroy Prod Infrastructure"
 
+run-name: "[Terraform] Destroy Prod Infrastructure (manual)"
+
 on:
   workflow_dispatch:
     inputs:

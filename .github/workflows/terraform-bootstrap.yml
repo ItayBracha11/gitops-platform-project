@@ -1,11 +1,13 @@
 name: "[Terraform] Bootstrap Backend"
 
+run-name: "[Terraform] Bootstrap Backend"
+
 on:
   workflow_dispatch:
 
 jobs:
   bootstrap:
-    name: Terraform Bootstrap
+    name: Terraform Bootstrap Backend
     runs-on: ubuntu-24.04
 
     defaults:
@@ -14,7 +16,7 @@ jobs:
 
     env:
       TF_IN_AUTOMATION: true
-      AWS_REGION: "us-east-1"
+      AWS_REGION: us-east-1
 
     steps:
       - name: Checkout repository
