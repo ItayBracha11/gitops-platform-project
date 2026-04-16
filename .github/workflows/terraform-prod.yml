@@ -54,9 +54,6 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Terraform Plan
-        run: terraform plan -var-file=prod.tfvars -var="enable_root_app=false"
-
       - name: Terraform Apply
         run: terraform apply -auto-approve -var-file=prod.tfvars -var="enable_root_app=false"
 
