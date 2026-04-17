@@ -55,7 +55,11 @@ jobs:
         run: terraform validate
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve -var-file=dev.tfvars -var="enable_root_app=false"
+        env:
+          TF_LOG: INFO
+        run: |
+          set -o pipefail
+          terraform apply -auto-approve -var-file=dev.tfvars -var="enable_root_app=false" -no-color 2>&1 | tee /tmp/terraform-live.log
 
       - name: Commit generated values file
         run: |
