@@ -70,7 +70,7 @@ jobs:
 
       - name: Terraform Apply (bootstrap)
         working-directory: infra/environments/dev/bootstrap
-        timeout-minutes: 15
+        timeout-minutes: 25
         run: |
           set -euo pipefail
 

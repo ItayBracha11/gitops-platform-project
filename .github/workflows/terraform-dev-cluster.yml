@@ -63,7 +63,7 @@ jobs:
         run: terraform validate
 
       - name: Terraform Apply
-        timeout-minutes: 25
+        timeout-minutes: 45
         env:
           TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |

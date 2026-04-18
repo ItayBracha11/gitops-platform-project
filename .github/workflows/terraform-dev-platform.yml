@@ -70,7 +70,7 @@ jobs:
 
       - name: Terraform Apply (platform)
         working-directory: infra/environments/dev/platform
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: |
           set -euo pipefail
 
