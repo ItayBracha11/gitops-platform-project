@@ -85,11 +85,11 @@ resource "aws_nat_gateway" "nat" {
 }
 
 resource "aws_route" "private_internet_access" {
-  count = length(aws_subnet.private)
+  count = var.enable_nat_gateway ? 1 : 0
 
   route_table_id         = aws_route_table.private.id
   destination_cidr_block = "0.0.0.0/0"
-  nat_gateway_id         = aws_nat_gateway.nat[count.index % var.nat_gateway_count].id
+  nat_gateway_id         = aws_nat_gateway.nat[0].id
 }
 
 resource "aws_route_table_association" "private" {
