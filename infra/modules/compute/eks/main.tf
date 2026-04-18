@@ -14,6 +14,10 @@ resource "aws_eks_cluster" "main" {
   tags = merge(var.tags, {
     Name = var.cluster_name
   })
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_policy
+  ]
 }
 
 resource "aws_eks_node_group" "main" {

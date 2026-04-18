@@ -1,0 +1,99 @@
+name: "[Terraform] Dev Platform"
+
+run-name: "[Terraform] Dev Platform"
+
+on:
+  workflow_run:
+    workflows: ["[Terraform] Dev Cluster"]
+    types:
+      - completed
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  platform:
+    name: Dev Platform
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+
+    env:
+      TF_IN_AUTOMATION: true
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect runner public IP
+        id: runner_ip
+        run: |
+          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
+          echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
+          echo "Runner public IP is ${IP}/32"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init (cluster)
+        working-directory: infra/environments/dev/cluster
+        run: terraform init
+
+      - name: Refresh cluster access CIDR for this runner
+        working-directory: infra/environments/dev/cluster
+        timeout-minutes: 15
+        env:
+          TF_LOG: DEBUG
+          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
+        run: |
+          set -euo pipefail
+          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-platform-cluster-refresh.log
+
+      - name: Terraform Init (platform)
+        working-directory: infra/environments/dev/platform
+        run: terraform init
+
+      - name: Terraform Validate (platform)
+        working-directory: infra/environments/dev/platform
+        run: terraform validate
+
+      - name: Terraform Apply (platform)
+        working-directory: infra/environments/dev/platform
+        timeout-minutes: 20
+        env:
+          TF_LOG: DEBUG
+        run: |
+          set -euo pipefail
+
+          (
+            while true; do
+              echo "=== terraform platform apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+              sleep 30
+            done
+          ) &
+          HEARTBEAT_PID=$!
+
+          terraform apply -auto-approve -var="aws_region=${AWS_REGION}" -no-color 2>&1 | tee /tmp/terraform-platform.log
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          kill $HEARTBEAT_PID || true
+          exit $EXIT_CODE
+
+      - name: Upload platform logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-dev-platform-logs
+          path: |
+            /tmp/terraform-platform-cluster-refresh.log
+            /tmp/terraform-platform.log

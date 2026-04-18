@@ -3,18 +3,8 @@ variable "cluster_name" {
   type        = string
 }
 
-variable "vpc_id" {
-  description = "VPC ID where the EKS cluster will be deployed"
-  type        = string
-}
-
 variable "private_subnet_ids" {
   description = "Private subnet IDs for worker nodes"
-  type        = list(string)
-}
-
-variable "public_subnet_ids" {
-  description = "Public subnet IDs for load balancers"
   type        = list(string)
 }
 

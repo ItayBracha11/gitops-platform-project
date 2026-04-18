@@ -58,10 +58,9 @@ variable "instance_types" {
   type        = list(string)
 }
 
-variable "enable_root_app" {
-  description = "Whether Terraform should create the ArgoCD root Application"
-  type        = bool
-  default     = false
+variable "public_access_cidrs" {
+  description = "CIDR blocks allowed to access the EKS public API endpoint"
+  type        = list(string)
 }
 
 variable "tags" {

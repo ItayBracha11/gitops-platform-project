@@ -1,0 +1,100 @@
+name: "[Terraform] Dev Cluster"
+
+run-name: "[Terraform] Dev Cluster"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/environments/dev/cluster/**'
+      - 'infra/modules/network/**'
+      - 'infra/modules/compute/**'
+      - 'infra/modules/security/**'
+      - '.github/workflows/terraform-dev-cluster.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cluster:
+    name: Dev Cluster
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: infra/environments/dev/cluster
+
+    env:
+      TF_IN_AUTOMATION: true
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ github.token }}
+
+      - name: Detect runner public IP
+        id: runner_ip
+        run: |
+          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
+          echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
+          echo "Runner public IP is ${IP}/32"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      - name: Terraform Apply
+        timeout-minutes: 25
+        env:
+          TF_LOG: DEBUG
+          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
+        run: |
+          set -euo pipefail
+
+          (
+            while true; do
+              echo "=== terraform cluster apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+              sleep 30
+            done
+          ) &
+          HEARTBEAT_PID=$!
+
+          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-cluster.log
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          kill $HEARTBEAT_PID || true
+          exit $EXIT_CODE
+
+      - name: Commit generated values file
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+          git add ../../../../gitops/infrastructure/alb-controller/values-dev.yaml
+          git commit -m "Update dev ALB controller values [skip ci]" || echo "No changes to commit"
+          git push
+
+      - name: Upload cluster log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-dev-cluster-log
+          path: /tmp/terraform-cluster.log
