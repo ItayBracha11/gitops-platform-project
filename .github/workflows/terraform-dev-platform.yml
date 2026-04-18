@@ -53,11 +53,12 @@ jobs:
         working-directory: infra/environments/dev/cluster
         timeout-minutes: 15
         env:
-          TF_LOG: DEBUG
           TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |
           set -euo pipefail
+          echo "::group::cluster access refresh"
           terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-platform-cluster-refresh.log
+          echo "::endgroup::"
 
       - name: Terraform Init (platform)
         working-directory: infra/environments/dev/platform
@@ -70,23 +71,24 @@ jobs:
       - name: Terraform Apply (platform)
         working-directory: infra/environments/dev/platform
         timeout-minutes: 20
-        env:
-          TF_LOG: DEBUG
         run: |
           set -euo pipefail
+
+          echo "::group::platform apply"
 
           (
             while true; do
               echo "=== terraform platform apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-              sleep 30
+              sleep 45
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform apply -auto-approve -var="aws_region=${AWS_REGION}" -no-color 2>&1 | tee /tmp/terraform-platform.log
+          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-platform.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
+          echo "::endgroup::"
           exit $EXIT_CODE
 
       - name: Upload platform logs

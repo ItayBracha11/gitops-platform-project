@@ -1,23 +1,16 @@
-name: "[Terraform] Dev Bootstrap"
+name: "[Terraform] Dev Bootstrap Destroy"
 
-run-name: "[Terraform] Dev Bootstrap"
+run-name: "[Terraform] Dev Bootstrap Destroy"
 
 on:
-  workflow_run:
-    workflows: ["[Terraform] Dev Platform"]
-    types:
-      - completed
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  bootstrap:
-    name: Dev Bootstrap
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+  bootstrap-destroy:
+    name: Dev Bootstrap Destroy
     runs-on: ubuntu-24.04
 
     env:
@@ -57,7 +50,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::cluster access refresh"
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-bootstrap-cluster-refresh.log
+          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-bootstrap-destroy-cluster-refresh.log
           echo "::endgroup::"
 
       - name: Terraform Init (bootstrap)
@@ -68,34 +61,34 @@ jobs:
         working-directory: infra/environments/dev/bootstrap
         run: terraform validate
 
-      - name: Terraform Apply (bootstrap)
+      - name: Terraform Destroy (bootstrap)
         working-directory: infra/environments/dev/bootstrap
         timeout-minutes: 15
         run: |
           set -euo pipefail
 
-          echo "::group::bootstrap apply"
+          echo "::group::bootstrap destroy"
 
           (
             while true; do
-              echo "=== terraform bootstrap apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+              echo "=== terraform bootstrap destroy still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
               sleep 45
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-bootstrap.log
+          terraform destroy -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-bootstrap-destroy.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
           echo "::endgroup::"
           exit $EXIT_CODE
 
-      - name: Upload bootstrap logs
+      - name: Upload bootstrap destroy logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-dev-bootstrap-logs
+          name: terraform-dev-bootstrap-destroy-logs
           path: |
-            /tmp/terraform-bootstrap-cluster-refresh.log
-            /tmp/terraform-bootstrap.log
+            /tmp/terraform-bootstrap-destroy-cluster-refresh.log
+            /tmp/terraform-bootstrap-destroy.log

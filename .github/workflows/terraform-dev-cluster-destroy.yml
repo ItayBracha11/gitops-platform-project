@@ -1,25 +1,23 @@
-name: "[Terraform] Dev Cluster"
+name: "[Terraform] Dev Cluster Destroy"
 
-run-name: "[Terraform] Dev Cluster"
+run-name: "[Terraform] Dev Cluster Destroy"
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'infra/environments/dev/cluster/**'
-      - 'infra/modules/network/**'
-      - 'infra/modules/compute/**'
-      - 'infra/modules/security/**'
-      - '.github/workflows/terraform-dev-cluster.yml'
+  workflow_run:
+    workflows: ["[Terraform] Dev Platform Destroy"]
+    types:
+      - completed
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  cluster:
-    name: Dev Cluster
+  cluster-destroy:
+    name: Dev Cluster Destroy
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
 
     defaults:
@@ -56,46 +54,36 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive
-
       - name: Terraform Validate
         run: terraform validate
 
-      - name: Terraform Apply
-        timeout-minutes: 25
+      - name: Terraform Destroy
+        timeout-minutes: 30
         env:
           TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |
           set -euo pipefail
 
-          echo "::group::cluster apply"
+          echo "::group::cluster destroy"
+
           (
             while true; do
-              echo "=== terraform cluster apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+              echo "=== terraform cluster destroy still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
               sleep 45
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-cluster.log
+          terraform destroy -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-cluster-destroy.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
           echo "::endgroup::"
           exit $EXIT_CODE
 
-      - name: Commit generated values file
-        run: |
-          git config --global user.name "github-actions"
-          git config --global user.email "github-actions@github.com"
-          git add ../../../../gitops/infrastructure/alb-controller/values-dev.yaml
-          git commit -m "Update dev ALB controller values [skip ci]" || echo "No changes to commit"
-          git push
-
-      - name: Upload cluster log
+      - name: Upload cluster destroy log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-dev-cluster-log
-          path: /tmp/terraform-cluster.log
+          name: terraform-dev-cluster-destroy-log
+          path: /tmp/terraform-cluster-destroy.log
