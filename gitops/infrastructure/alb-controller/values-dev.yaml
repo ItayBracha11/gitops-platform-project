@@ -1,1 +1,1 @@
-iamRoleArn: ""
+iamRoleArn: arn:aws:iam::111310799979:role/eks-gitops-demo-dev-alb-controller-role
