@@ -63,7 +63,7 @@ jobs:
         run: terraform validate
 
       - name: Terraform Apply
-        timeout-minutes: 45
+        timeout-minutes: 60
         env:
           TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |
@@ -84,6 +84,66 @@ jobs:
           kill $HEARTBEAT_PID || true
           echo "::endgroup::"
           exit $EXIT_CODE
+
+############################################################################################# DEBUG
+
+      
+      - name: Diagnose EKS node group
+        if: always()
+        run: |
+          echo "::group::eks cluster"
+          aws eks describe-cluster \
+            --name eks-gitops-demo-dev \
+            --region us-east-1 || true
+          echo "::endgroup::"
+
+          echo "::group::eks node group"
+          aws eks describe-nodegroup \
+            --cluster-name eks-gitops-demo-dev \
+            --nodegroup-name eks-gitops-demo-dev-node-group \
+            --region us-east-1 || true
+          echo "::endgroup::"
+
+      - name: Diagnose Auto Scaling and EC2
+        if: always()
+        run: |
+          set -euo pipefail
+
+          NG_ASG=$(aws eks describe-nodegroup \
+            --cluster-name eks-gitops-demo-dev \
+            --nodegroup-name eks-gitops-demo-dev-node-group \
+            --region us-east-1 \
+            --query 'nodegroup.resources.autoScalingGroups[0].name' \
+            --output text 2>/dev/null || true)
+
+          echo "::group::autoscaling group"
+          if [ -n "${NG_ASG:-}" ] && [ "$NG_ASG" != "None" ]; then
+            aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$NG_ASG" \
+              --region us-east-1 || true
+          else
+            echo "No ASG found for node group"
+          fi
+          echo "::endgroup::"
+
+          echo "::group::instances"
+          if [ -n "${NG_ASG:-}" ] && [ "$NG_ASG" != "None" ]; then
+            INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "$NG_ASG" \
+              --region us-east-1 \
+              --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
+              --output text 2>/dev/null || true)
+
+            if [ -n "${INSTANCE_IDS:-}" ]; then
+              aws ec2 describe-instances \
+                --instance-ids $INSTANCE_IDS \
+                --region us-east-1 || true
+            else
+              echo "No EC2 instances found in ASG"
+            fi
+          fi
+          echo "::endgroup::"
+############################################################################################# DEBUG
 
       - name: Commit generated values file
         run: |
