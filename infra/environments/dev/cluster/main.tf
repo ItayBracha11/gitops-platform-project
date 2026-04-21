@@ -48,6 +48,7 @@ resource "local_file" "alb_values_dev" {
       role_arn     = module.iam.alb_controller_role_arn
       cluster_name = module.eks.cluster_name
       region       = var.aws_region
+      vpc_id       = module.vpc.vpc_id
     }
   )
 

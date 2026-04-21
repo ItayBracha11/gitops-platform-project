@@ -1,17 +1,7 @@
 name: "[Terraform] Dev Cluster"
 
-run-name: "[Terraform] Dev Cluster"
-
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - 'infra/environments/dev/cluster/**'
-      - 'infra/modules/network/**'
-      - 'infra/modules/compute/**'
-      - 'infra/modules/security/**'
-      - '.github/workflows/terraform-dev-cluster.yml'
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -60,7 +50,7 @@ jobs:
         run: terraform fmt -check -recursive
 
       - name: Terraform Validate
-        run: terraform validate
+        run: terraform validate -no-color
 
       - name: Terraform Apply
         timeout-minutes: 60
@@ -70,80 +60,21 @@ jobs:
           set -euo pipefail
 
           echo "::group::cluster apply"
+
           (
             while true; do
               echo "=== terraform cluster apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-              sleep 45
+              sleep 60
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-cluster.log
+          terraform apply -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-cluster.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
           echo "::endgroup::"
           exit $EXIT_CODE
-
-############################################################################################# DEBUG
-
-      
-      - name: Diagnose EKS node group
-        if: always()
-        run: |
-          echo "::group::eks cluster"
-          aws eks describe-cluster \
-            --name eks-gitops-demo-dev \
-            --region us-east-1 || true
-          echo "::endgroup::"
-
-          echo "::group::eks node group"
-          aws eks describe-nodegroup \
-            --cluster-name eks-gitops-demo-dev \
-            --nodegroup-name eks-gitops-demo-dev-node-group \
-            --region us-east-1 || true
-          echo "::endgroup::"
-
-      - name: Diagnose Auto Scaling and EC2
-        if: always()
-        run: |
-          set -euo pipefail
-
-          NG_ASG=$(aws eks describe-nodegroup \
-            --cluster-name eks-gitops-demo-dev \
-            --nodegroup-name eks-gitops-demo-dev-node-group \
-            --region us-east-1 \
-            --query 'nodegroup.resources.autoScalingGroups[0].name' \
-            --output text 2>/dev/null || true)
-
-          echo "::group::autoscaling group"
-          if [ -n "${NG_ASG:-}" ] && [ "$NG_ASG" != "None" ]; then
-            aws autoscaling describe-auto-scaling-groups \
-              --auto-scaling-group-names "$NG_ASG" \
-              --region us-east-1 || true
-          else
-            echo "No ASG found for node group"
-          fi
-          echo "::endgroup::"
-
-          echo "::group::instances"
-          if [ -n "${NG_ASG:-}" ] && [ "$NG_ASG" != "None" ]; then
-            INSTANCE_IDS=$(aws autoscaling describe-auto-scaling-groups \
-              --auto-scaling-group-names "$NG_ASG" \
-              --region us-east-1 \
-              --query 'AutoScalingGroups[0].Instances[*].InstanceId' \
-              --output text 2>/dev/null || true)
-
-            if [ -n "${INSTANCE_IDS:-}" ]; then
-              aws ec2 describe-instances \
-                --instance-ids $INSTANCE_IDS \
-                --region us-east-1 || true
-            else
-              echo "No EC2 instances found in ASG"
-            fi
-          fi
-          echo "::endgroup::"
-############################################################################################# DEBUG
 
       - name: Commit generated values file
         run: |

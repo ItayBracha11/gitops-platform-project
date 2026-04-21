@@ -1,12 +1,7 @@
 name: "[Terraform] Dev Platform"
 
-run-name: "[Terraform] Dev Platform"
-
 on:
-  workflow_run:
-    workflows: ["[Terraform] Dev Cluster"]
-    types:
-      - completed
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -15,9 +10,6 @@ permissions:
 jobs:
   platform:
     name: Dev Platform
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
 
     env:
@@ -57,7 +49,7 @@ jobs:
         run: |
           set -euo pipefail
           echo "::group::cluster access refresh"
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-platform-cluster-refresh.log
+          terraform apply -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-platform-cluster-refresh.log
           echo "::endgroup::"
 
       - name: Terraform Init (platform)
@@ -66,7 +58,7 @@ jobs:
 
       - name: Terraform Validate (platform)
         working-directory: infra/environments/dev/platform
-        run: terraform validate
+        run: terraform validate -no-color
 
       - name: Terraform Apply (platform)
         working-directory: infra/environments/dev/platform
@@ -79,12 +71,12 @@ jobs:
           (
             while true; do
               echo "=== terraform platform apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-              sleep 45
+              sleep 60
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-platform.log
+          terraform apply -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-platform.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true

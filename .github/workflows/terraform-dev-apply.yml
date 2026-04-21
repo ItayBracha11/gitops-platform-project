@@ -1,0 +1,107 @@
+name: "[Terraform] Dev Apply"
+
+run-name: "[Terraform] Dev Apply"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/environments/dev/**'
+      - 'infra/modules/**'
+      - 'gitops/applications/dev/**'
+      - '.github/workflows/terraform-dev-apply.yml'
+      - '.github/workflows/terraform-dev-cluster.yml'
+      - '.github/workflows/terraform-dev-platform.yml'
+      - '.github/workflows/terraform-dev-bootstrap.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: terraform-dev-apply
+  cancel-in-progress: false
+
+jobs:
+  detect:
+    name: Detect what should run
+    runs-on: ubuntu-24.04
+
+    env:
+      CLUSTER_PATH_REGEX: '^(infra/environments/dev/cluster/|infra/modules/network/|infra/modules/compute/|infra/modules/security/|\.github/workflows/terraform-dev-cluster\.yml)'
+      PLATFORM_PATH_REGEX: '^(infra/environments/dev/platform/|infra/modules/platform/argocd/|\.github/workflows/terraform-dev-platform\.yml)'
+      BOOTSTRAP_PATH_REGEX: '^(infra/environments/dev/bootstrap/|gitops/applications/dev/|\.github/workflows/terraform-dev-bootstrap\.yml)'
+
+    outputs:
+      run_cluster: ${{ steps.set.outputs.run_cluster }}
+      run_platform: ${{ steps.set.outputs.run_platform }}
+      run_bootstrap: ${{ steps.set.outputs.run_bootstrap }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set run flags
+        id: set
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_cluster=true" >> "$GITHUB_OUTPUT"
+            echo "run_platform=true" >> "$GITHUB_OUTPUT"
+            echo "run_bootstrap=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          FILES="$(git diff --name-only HEAD^ HEAD || true)"
+
+          run_cluster=false
+          run_platform=false
+          run_bootstrap=false
+
+          if echo "$FILES" | grep -Eq "$CLUSTER_PATH_REGEX"; then
+            run_cluster=true
+            run_platform=true
+            run_bootstrap=true
+          elif echo "$FILES" | grep -Eq "$PLATFORM_PATH_REGEX"; then
+            run_platform=true
+            run_bootstrap=true
+          elif echo "$FILES" | grep -Eq "$BOOTSTRAP_PATH_REGEX"; then
+            run_bootstrap=true
+          fi
+
+          echo "run_cluster=$run_cluster" >> "$GITHUB_OUTPUT"
+          echo "run_platform=$run_platform" >> "$GITHUB_OUTPUT"
+          echo "run_bootstrap=$run_bootstrap" >> "$GITHUB_OUTPUT"
+
+  cluster:
+    name: Dev Cluster
+    needs: detect
+    if: needs.detect.outputs.run_cluster == 'true'
+    uses: ./.github/workflows/terraform-dev-cluster.yml
+    secrets: inherit
+
+  platform:
+    name: Dev Platform
+    needs:
+      - detect
+      - cluster
+    if: |
+      needs.detect.outputs.run_platform == 'true' &&
+      (needs.detect.outputs.run_cluster != 'true' || needs.cluster.result == 'success')
+    uses: ./.github/workflows/terraform-dev-platform.yml
+    secrets: inherit
+
+  bootstrap:
+    name: Dev Bootstrap
+    needs:
+      - detect
+      - cluster
+      - platform
+    if: |
+      needs.detect.outputs.run_bootstrap == 'true' &&
+      (needs.detect.outputs.run_cluster != 'true' || needs.cluster.result == 'success') &&
+      (needs.detect.outputs.run_platform != 'true' || needs.platform.result == 'success')
+    uses: ./.github/workflows/terraform-dev-bootstrap.yml
+    secrets: inherit
