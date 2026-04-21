@@ -20,7 +20,7 @@ data "aws_eks_cluster_auth" "this" {
 module "argocd" {
   source = "../../../modules/platform/argocd"
 
-  namespace       = var.argocd_namespace
-  chart_version   = var.argocd_chart_version
+  namespace        = var.argocd_namespace
+  chart_version    = var.argocd_chart_version
   create_namespace = true
 }

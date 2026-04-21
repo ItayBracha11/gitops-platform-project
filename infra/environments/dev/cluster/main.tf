@@ -1,7 +1,7 @@
 module "vpc" {
   source = "../../../modules/network/vpc"
 
-  cidr_block = var.cidr_block
+  cidr_block   = var.cidr_block
   cluster_name = var.cluster_name
 
   public_subnet_cidrs  = var.public_subnet_cidrs
