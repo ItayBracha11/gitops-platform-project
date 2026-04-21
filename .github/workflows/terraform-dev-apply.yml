@@ -16,6 +16,9 @@ on:
       - '.github/workflows/terraform-dev-bootstrap.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: terraform-dev-apply
   cancel-in-progress: false
