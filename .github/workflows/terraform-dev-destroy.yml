@@ -21,7 +21,6 @@ jobs:
       AWS_REGION: us-east-1
 
     outputs:
-      cidr: ${{ steps.runner_ip.outputs.cidr }}
       vpc_id: ${{ steps.tf_outputs.outputs.vpc_id }}
       cluster_name: ${{ steps.tf_outputs.outputs.cluster_name }}
       cluster_exists: ${{ steps.cluster_check.outputs.cluster_exists }}
@@ -29,13 +28,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Detect runner public IP
-        id: runner_ip
-        run: |
-          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
-          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
-          echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -76,20 +68,6 @@ jobs:
             echo "cluster_exists=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Allow this runner to reach the cluster API
-        if: steps.cluster_check.outputs.cluster_exists == 'true'
-        run: |
-          set -euo pipefail
-
-          aws eks update-cluster-config \
-            --name "${{ steps.tf_outputs.outputs.cluster_name }}" \
-            --region "$AWS_REGION" \
-            --resources-vpc-config endpointPublicAccess=true,publicAccessCidrs="[\"${{ steps.runner_ip.outputs.cidr }}\"]"
-
-          aws eks wait cluster-active \
-            --name "${{ steps.tf_outputs.outputs.cluster_name }}" \
-            --region "$AWS_REGION"
-
   bootstrap:
     name: Dev Bootstrap Destroy
     needs: prepare-destroy-context
@@ -123,7 +101,7 @@ jobs:
         needs.prepare-destroy-context.outputs.cluster_exists == 'false' ||
         needs.platform.result == 'success'
       )
-        
+
     env:
       AWS_REGION: us-east-1
       VPC_ID: ${{ needs.prepare-destroy-context.outputs.vpc_id }}
