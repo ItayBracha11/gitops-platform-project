@@ -106,10 +106,8 @@ jobs:
       - bootstrap
     if: |
       needs.prepare-destroy-context.result == 'success' &&
-      (
-        needs.prepare-destroy-context.outputs.cluster_exists == 'false' ||
-        needs.bootstrap.result == 'success'
-      )
+      needs.prepare-destroy-context.outputs.cluster_exists == 'true' &&
+      needs.bootstrap.result == 'success'
     uses: ./.github/workflows/terraform-dev-platform-destroy.yml
     secrets: inherit
 
@@ -121,8 +119,11 @@ jobs:
       - platform
     if: |
       needs.prepare-destroy-context.result == 'success' &&
-      needs.platform.result == 'success'
-
+      (
+        needs.prepare-destroy-context.outputs.cluster_exists == 'false' ||
+        needs.platform.result == 'success'
+      )
+        
     env:
       AWS_REGION: us-east-1
       VPC_ID: ${{ needs.prepare-destroy-context.outputs.vpc_id }}
