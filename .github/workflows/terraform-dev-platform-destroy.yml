@@ -15,6 +15,7 @@ jobs:
     env:
       TF_IN_AUTOMATION: true
       AWS_REGION: us-east-1
+      CLUSTER_NAME: eks-gitops-demo-dev
 
     steps:
       - name: Checkout repository
@@ -24,7 +25,8 @@ jobs:
         id: runner_ip
         run: |
           IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
-          echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
+          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+          echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -36,15 +38,18 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform Init (cluster)
-        working-directory: infra/environments/dev/cluster
-        run: terraform init
+      - name: Allow this runner to reach the cluster API
+        run: |
+          set -euo pipefail
 
-      - name: Refresh cluster access CIDR for this runner
-        working-directory: infra/environments/dev/cluster
-        env:
-          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
-        run: terraform apply -auto-approve -var-file=dev.tfvars -no-color -compact-warnings
+          aws eks update-cluster-config \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --resources-vpc-config endpointPublicAccess=true,publicAccessCidrs="[\"${{ steps.runner_ip.outputs.cidr }}\"]"
+
+          aws eks wait cluster-active \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION"
 
       - name: Terraform Init (platform)
         working-directory: infra/environments/dev/platform

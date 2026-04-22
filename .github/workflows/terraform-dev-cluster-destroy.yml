@@ -24,12 +24,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Detect runner public IP
-        id: runner_ip
-        run: |
-          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
-          echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
-
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
@@ -45,8 +39,6 @@ jobs:
 
       - name: Terraform Destroy
         timeout-minutes: 60
-        env:
-          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |
           set -euo pipefail
 

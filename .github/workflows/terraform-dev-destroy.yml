@@ -25,9 +25,66 @@ jobs:
     uses: ./.github/workflows/terraform-dev-platform-destroy.yml
     secrets: inherit
 
-  cluster:
-    name: Dev Cluster Destroy
+  wait-for-aws-cleanup:
+    name: Wait for AWS LB cleanup
+    runs-on: ubuntu-24.04
     needs: platform
     if: needs.platform.result == 'success'
+
+    env:
+      AWS_REGION: us-east-1
+      VPC_ID: vpc-0a54bc3b019df6ac1
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Wait until ALB resources are gone
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for i in $(seq 1 40); do
+            echo "Check #$i"
+
+            LB_COUNT=$(aws elbv2 describe-load-balancers \
+              --region "$AWS_REGION" \
+              --query "LoadBalancers[?VpcId=='${VPC_ID}'] | length(@)" \
+              --output text)
+
+            TG_COUNT=$(aws elbv2 describe-target-groups \
+              --region "$AWS_REGION" \
+              --query "TargetGroups[?VpcId=='${VPC_ID}'] | length(@)" \
+              --output text)
+
+            ENI_COUNT=$(aws ec2 describe-network-interfaces \
+              --region "$AWS_REGION" \
+              --filters Name=vpc-id,Values="${VPC_ID}" \
+              --query "NetworkInterfaces[?Attachment.InstanceOwnerId=='amazon-elb'] | length(@)" \
+              --output text)
+
+            echo "Load balancers: $LB_COUNT"
+            echo "Target groups:  $TG_COUNT"
+            echo "ELB ENIs:       $ENI_COUNT"
+
+            if [ "$LB_COUNT" = "0" ] && [ "$TG_COUNT" = "0" ] && [ "$ENI_COUNT" = "0" ]; then
+              echo "AWS LB cleanup complete"
+              exit 0
+            fi
+
+            sleep 30
+          done
+
+          echo "Timed out waiting for ALB cleanup"
+          exit 1
+
+  cluster:
+    name: Dev Cluster Destroy
+    needs: wait-for-aws-cleanup
+    if: needs.wait-for-aws-cleanup.result == 'success'
     uses: ./.github/workflows/terraform-dev-cluster-destroy.yml
     secrets: inherit
