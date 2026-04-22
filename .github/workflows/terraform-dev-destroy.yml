@@ -13,27 +13,119 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  prepare-destroy-context:
+    name: Prepare destroy context
+    runs-on: ubuntu-24.04
+
+    env:
+      AWS_REGION: us-east-1
+
+    outputs:
+      cidr: ${{ steps.runner_ip.outputs.cidr }}
+      vpc_id: ${{ steps.tf_outputs.outputs.vpc_id }}
+      cluster_name: ${{ steps.tf_outputs.outputs.cluster_name }}
+      cluster_exists: ${{ steps.cluster_check.outputs.cluster_exists }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect runner public IP
+        id: runner_ip
+        run: |
+          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
+          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
+          echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init (cluster)
+        working-directory: infra/environments/dev/cluster
+        run: terraform init
+
+      - name: Read cluster state outputs
+        id: tf_outputs
+        working-directory: infra/environments/dev/cluster
+        run: |
+          set -euo pipefail
+
+          VPC_ID=$(terraform output -raw vpc_id)
+          CLUSTER_NAME=$(terraform output -raw cluster_name)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+          echo "cluster_name=$CLUSTER_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether cluster still exists
+        id: cluster_check
+        run: |
+          set -euo pipefail
+
+          if aws eks describe-cluster \
+            --name "${{ steps.tf_outputs.outputs.cluster_name }}" \
+            --region "$AWS_REGION" >/dev/null 2>&1; then
+            echo "cluster_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cluster_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Allow this runner to reach the cluster API
+        if: steps.cluster_check.outputs.cluster_exists == 'true'
+        run: |
+          set -euo pipefail
+
+          aws eks update-cluster-config \
+            --name "${{ steps.tf_outputs.outputs.cluster_name }}" \
+            --region "$AWS_REGION" \
+            --resources-vpc-config endpointPublicAccess=true,publicAccessCidrs="[\"${{ steps.runner_ip.outputs.cidr }}\"]"
+
+          aws eks wait cluster-active \
+            --name "${{ steps.tf_outputs.outputs.cluster_name }}" \
+            --region "$AWS_REGION"
+
   bootstrap:
     name: Dev Bootstrap Destroy
+    needs: prepare-destroy-context
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      needs.prepare-destroy-context.outputs.cluster_exists == 'true'
     uses: ./.github/workflows/terraform-dev-bootstrap-destroy.yml
     secrets: inherit
 
   platform:
     name: Dev Platform Destroy
-    needs: bootstrap
-    if: needs.bootstrap.result == 'success'
+    needs:
+      - prepare-destroy-context
+      - bootstrap
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      (
+        needs.prepare-destroy-context.outputs.cluster_exists == 'false' ||
+        needs.bootstrap.result == 'success'
+      )
     uses: ./.github/workflows/terraform-dev-platform-destroy.yml
     secrets: inherit
 
   wait-for-aws-cleanup:
     name: Wait for AWS LB cleanup
     runs-on: ubuntu-24.04
-    needs: platform
-    if: needs.platform.result == 'success'
+    needs:
+      - prepare-destroy-context
+      - platform
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      needs.platform.result == 'success'
 
     env:
       AWS_REGION: us-east-1
-      VPC_ID: vpc-0a54bc3b019df6ac1
+      VPC_ID: ${{ needs.prepare-destroy-context.outputs.vpc_id }}
 
     steps:
       - name: Configure AWS credentials
@@ -44,12 +136,11 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Wait until ALB resources are gone
-        shell: bash
         run: |
           set -euo pipefail
 
           for i in $(seq 1 40); do
-            echo "Check #$i"
+            echo "Check #$i for VPC $VPC_ID"
 
             LB_COUNT=$(aws elbv2 describe-load-balancers \
               --region "$AWS_REGION" \

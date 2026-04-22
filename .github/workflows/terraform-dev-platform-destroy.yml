@@ -15,18 +15,10 @@ jobs:
     env:
       TF_IN_AUTOMATION: true
       AWS_REGION: us-east-1
-      CLUSTER_NAME: eks-gitops-demo-dev
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-      - name: Detect runner public IP
-        id: runner_ip
-        run: |
-          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
-          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
-          echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -37,19 +29,6 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
-
-      - name: Allow this runner to reach the cluster API
-        run: |
-          set -euo pipefail
-
-          aws eks update-cluster-config \
-            --name "$CLUSTER_NAME" \
-            --region "$AWS_REGION" \
-            --resources-vpc-config endpointPublicAccess=true,publicAccessCidrs="[\"${{ steps.runner_ip.outputs.cidr }}\"]"
-
-          aws eks wait cluster-active \
-            --name "$CLUSTER_NAME" \
-            --region "$AWS_REGION"
 
       - name: Terraform Init (platform)
         working-directory: infra/environments/dev/platform
