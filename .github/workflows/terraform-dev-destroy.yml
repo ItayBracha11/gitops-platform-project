@@ -77,29 +77,17 @@ jobs:
     uses: ./.github/workflows/terraform-dev-bootstrap-destroy.yml
     secrets: inherit
 
-  platform:
-    name: Dev Platform Destroy
-    needs:
-      - prepare-destroy-context
-      - bootstrap
-    if: |
-      needs.prepare-destroy-context.result == 'success' &&
-      needs.prepare-destroy-context.outputs.cluster_exists == 'true' &&
-      needs.bootstrap.result == 'success'
-    uses: ./.github/workflows/terraform-dev-platform-destroy.yml
-    secrets: inherit
-
   wait-for-aws-cleanup:
     name: Wait for AWS LB cleanup
     runs-on: ubuntu-24.04
     needs:
       - prepare-destroy-context
-      - platform
+      - bootstrap
     if: |
       needs.prepare-destroy-context.result == 'success' &&
       (
         needs.prepare-destroy-context.outputs.cluster_exists == 'false' ||
-        needs.platform.result == 'success'
+        needs.bootstrap.result == 'success'
       )
 
     env:
@@ -152,9 +140,29 @@ jobs:
           echo "Timed out waiting for ALB cleanup"
           exit 1
 
+  platform:
+    name: Dev Platform Destroy
+    needs:
+      - prepare-destroy-context
+      - wait-for-aws-cleanup
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      needs.prepare-destroy-context.outputs.cluster_exists == 'true' &&
+      needs.wait-for-aws-cleanup.result == 'success'
+    uses: ./.github/workflows/terraform-dev-platform-destroy.yml
+    secrets: inherit
+
   cluster:
     name: Dev Cluster Destroy
-    needs: wait-for-aws-cleanup
-    if: needs.wait-for-aws-cleanup.result == 'success'
+    needs:
+      - prepare-destroy-context
+      - wait-for-aws-cleanup
+      - platform
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      (
+        (needs.prepare-destroy-context.outputs.cluster_exists == 'true' && needs.platform.result == 'success') ||
+        (needs.prepare-destroy-context.outputs.cluster_exists == 'false' && needs.wait-for-aws-cleanup.result == 'success')
+      )
     uses: ./.github/workflows/terraform-dev-cluster-destroy.yml
     secrets: inherit
