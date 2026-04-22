@@ -1,12 +1,7 @@
 name: "[Terraform] Dev Platform Destroy"
 
-run-name: "[Terraform] Dev Platform Destroy"
-
 on:
-  workflow_run:
-    workflows: ["[Terraform] Dev Bootstrap Destroy"]
-    types:
-      - completed
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -15,9 +10,6 @@ permissions:
 jobs:
   platform-destroy:
     name: Dev Platform Destroy
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
 
     env:
@@ -33,7 +25,6 @@ jobs:
         run: |
           IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
           echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
-          echo "Runner public IP is ${IP}/32"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -51,51 +42,37 @@ jobs:
 
       - name: Refresh cluster access CIDR for this runner
         working-directory: infra/environments/dev/cluster
-        timeout-minutes: 15
         env:
           TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
-        run: |
-          set -euo pipefail
-          echo "::group::cluster access refresh"
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-platform-destroy-cluster-refresh.log
-          echo "::endgroup::"
+        run: terraform apply -auto-approve -var-file=dev.tfvars -no-color -compact-warnings
 
       - name: Terraform Init (platform)
         working-directory: infra/environments/dev/platform
         run: terraform init
 
-      - name: Terraform Validate (platform)
-        working-directory: infra/environments/dev/platform
-        run: terraform validate
-
       - name: Terraform Destroy (platform)
         working-directory: infra/environments/dev/platform
-        timeout-minutes: 20
+        timeout-minutes: 30
         run: |
           set -euo pipefail
-
-          echo "::group::platform destroy"
 
           (
             while true; do
               echo "=== terraform platform destroy still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-              sleep 45
+              sleep 60
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform destroy -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-platform-destroy.log
+          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-platform-destroy.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
-          echo "::endgroup::"
           exit $EXIT_CODE
 
-      - name: Upload platform destroy logs
+      - name: Upload platform destroy log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-dev-platform-destroy-logs
-          path: |
-            /tmp/terraform-platform-destroy-cluster-refresh.log
-            /tmp/terraform-platform-destroy.log
+          name: terraform-dev-platform-destroy-log
+          path: /tmp/terraform-platform-destroy.log

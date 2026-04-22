@@ -1,8 +1,7 @@
 name: "[Terraform] Dev Bootstrap Destroy"
 
-run-name: "[Terraform] Dev Bootstrap Destroy"
-
 on:
+  workflow_call:
   workflow_dispatch:
 
 permissions:
@@ -26,7 +25,6 @@ jobs:
         run: |
           IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
           echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
-          echo "Runner public IP is ${IP}/32"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -44,51 +42,37 @@ jobs:
 
       - name: Refresh cluster access CIDR for this runner
         working-directory: infra/environments/dev/cluster
-        timeout-minutes: 15
         env:
           TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
-        run: |
-          set -euo pipefail
-          echo "::group::cluster access refresh"
-          terraform apply -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-bootstrap-destroy-cluster-refresh.log
-          echo "::endgroup::"
+        run: terraform apply -auto-approve -var-file=dev.tfvars -no-color -compact-warnings
 
       - name: Terraform Init (bootstrap)
         working-directory: infra/environments/dev/bootstrap
         run: terraform init
 
-      - name: Terraform Validate (bootstrap)
-        working-directory: infra/environments/dev/bootstrap
-        run: terraform validate
-
       - name: Terraform Destroy (bootstrap)
         working-directory: infra/environments/dev/bootstrap
-        timeout-minutes: 15
+        timeout-minutes: 20
         run: |
           set -euo pipefail
-
-          echo "::group::bootstrap destroy"
 
           (
             while true; do
               echo "=== terraform bootstrap destroy still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-              sleep 45
+              sleep 60
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform destroy -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-bootstrap-destroy.log
+          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-bootstrap-destroy.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
-          echo "::endgroup::"
           exit $EXIT_CODE
 
-      - name: Upload bootstrap destroy logs
+      - name: Upload bootstrap destroy log
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: terraform-dev-bootstrap-destroy-logs
-          path: |
-            /tmp/terraform-bootstrap-destroy-cluster-refresh.log
-            /tmp/terraform-bootstrap-destroy.log
+          name: terraform-dev-bootstrap-destroy-log
+          path: /tmp/terraform-bootstrap-destroy.log

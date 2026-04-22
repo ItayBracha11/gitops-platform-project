@@ -1,0 +1,33 @@
+name: "[Terraform] Dev Destroy"
+
+run-name: "[Terraform] Dev Destroy"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-dev-destroy
+  cancel-in-progress: false
+
+jobs:
+  bootstrap:
+    name: Dev Bootstrap Destroy
+    uses: ./.github/workflows/terraform-dev-bootstrap-destroy.yml
+    secrets: inherit
+
+  platform:
+    name: Dev Platform Destroy
+    needs: bootstrap
+    if: needs.bootstrap.result == 'success'
+    uses: ./.github/workflows/terraform-dev-platform-destroy.yml
+    secrets: inherit
+
+  cluster:
+    name: Dev Cluster Destroy
+    needs: platform
+    if: needs.platform.result == 'success'
+    uses: ./.github/workflows/terraform-dev-cluster-destroy.yml
+    secrets: inherit

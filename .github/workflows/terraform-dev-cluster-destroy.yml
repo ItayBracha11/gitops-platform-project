@@ -1,23 +1,15 @@
 name: "[Terraform] Dev Cluster Destroy"
 
-run-name: "[Terraform] Dev Cluster Destroy"
-
 on:
-  workflow_run:
-    workflows: ["[Terraform] Dev Platform Destroy"]
-    types:
-      - completed
+  workflow_call:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   cluster-destroy:
     name: Dev Cluster Destroy
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-24.04
 
     defaults:
@@ -31,15 +23,12 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ github.token }}
 
       - name: Detect runner public IP
         id: runner_ip
         run: |
           IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
           echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
-          echo "Runner public IP is ${IP}/32"
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
@@ -54,31 +43,25 @@ jobs:
       - name: Terraform Init
         run: terraform init
 
-      - name: Terraform Validate
-        run: terraform validate
-
       - name: Terraform Destroy
-        timeout-minutes: 30
+        timeout-minutes: 60
         env:
           TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |
           set -euo pipefail
 
-          echo "::group::cluster destroy"
-
           (
             while true; do
               echo "=== terraform cluster destroy still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-              sleep 45
+              sleep 60
             done
           ) &
           HEARTBEAT_PID=$!
 
-          terraform destroy -auto-approve -var-file=dev.tfvars -no-color 2>&1 | tee /tmp/terraform-cluster-destroy.log
+          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-cluster-destroy.log
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
-          echo "::endgroup::"
           exit $EXIT_CODE
 
       - name: Upload cluster destroy log
