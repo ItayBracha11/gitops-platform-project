@@ -35,9 +35,6 @@ resource "kubernetes_manifest" "root_application" {
     metadata = {
       name      = "root-app"
       namespace = var.argocd_namespace
-      finalizers = [
-        "resources-finalizer.argocd.argoproj.io"
-      ]
     }
     spec = {
       project = "default"

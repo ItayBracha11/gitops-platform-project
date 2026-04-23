@@ -25,7 +25,6 @@ jobs:
         id: runner_ip
         run: |
           IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
-          echo "ip=${IP}" >> "$GITHUB_OUTPUT"
           echo "cidr=${IP}/32" >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
@@ -50,6 +49,51 @@ jobs:
           aws eks wait cluster-active \
             --name "$CLUSTER_NAME" \
             --region "$AWS_REGION"
+
+      - name: Configure kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --region "$AWS_REGION" \
+            --name "$CLUSTER_NAME"
+
+      - name: Delete ArgoCD child applications
+        run: |
+          set -euo pipefail
+
+          kubectl delete application demo-app-dev -n argocd --ignore-not-found=true
+          kubectl delete application aws-load-balancer-controller-dev -n argocd --ignore-not-found=true
+          kubectl delete application aws-load-balancer-controller-sa-dev -n argocd --ignore-not-found=true
+
+      - name: Wait for applications to be deleted
+        run: |
+          set -euo pipefail
+
+          for i in $(seq 1 40); do
+            echo "Checking if target applications are gone (attempt $i)..."
+
+            LEFT=0
+
+            for APP in demo-app-dev aws-load-balancer-controller-dev aws-load-balancer-controller-sa-dev; do
+              if kubectl get application "$APP" -n argocd >/dev/null 2>&1; then
+                echo "$APP still exists"
+                LEFT=1
+              fi
+            done
+
+            if [ "$LEFT" -eq 0 ]; then
+              echo "Target applications deleted"
+              exit 0
+            fi
+
+            sleep 15
+          done
+
+          echo "Timed out waiting for target applications to be deleted"
+          exit 1
+
+      - name: Show remaining ingress (debug)
+        run: |
+          kubectl get ingress -A || true
 
       - name: Terraform Init (bootstrap)
         working-directory: infra/environments/dev/bootstrap
