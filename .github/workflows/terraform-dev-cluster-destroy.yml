@@ -24,6 +24,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Detect runner public IP
+        id: runner_ip
+        run: |
+          set -euo pipefail
+          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
+          echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
@@ -35,9 +42,11 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: Show cluster destroy context
+        env:
+          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |
           set -euo pipefail
 
@@ -76,50 +85,14 @@ jobs:
 
       - name: Terraform Destroy
         timeout-minutes: 90
+        env:
+          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
         run: |
           set -euo pipefail
 
-          VPC_ID=$(terraform output -raw vpc_id || true)
-          CLUSTER_NAME=$(terraform output -raw cluster_name || true)
-
-          (
-            while true; do
-              echo "=== cluster destroy still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
-
-              echo "EKS:"
-              aws eks describe-cluster \
-                --name "$CLUSTER_NAME" \
-                --region "$AWS_REGION" \
-                --query 'cluster.status' \
-                --output text || true
-
-              echo "Nodegroups:"
-              aws eks list-nodegroups \
-                --cluster-name "$CLUSTER_NAME" \
-                --region "$AWS_REGION" \
-                --output text || true
-
-              echo "NAT gateways:"
-              aws ec2 describe-nat-gateways \
-                --region "$AWS_REGION" \
-                --filter Name=vpc-id,Values="$VPC_ID" \
-                --query 'NatGateways[*].[NatGatewayId,State,SubnetId]' \
-                --output table || true
-
-              echo "ENIs:"
-              aws ec2 describe-network-interfaces \
-                --region "$AWS_REGION" \
-                --filters Name=vpc-id,Values="$VPC_ID" \
-                --query 'NetworkInterfaces[*].[NetworkInterfaceId,Status,Description,Attachment.InstanceOwnerId,Association.PublicIp,SubnetId]' \
-                --output table || true
-
-              sleep 120
-            done
-          ) &
-          HEARTBEAT_PID=$!
-
-          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings
-          EXIT_CODE=$?
-
-          kill "$HEARTBEAT_PID" || true
-          exit "$EXIT_CODE"
+          terraform destroy \
+            -auto-approve \
+            -input=false \
+            -var-file=dev.tfvars \
+            -no-color \
+            -compact-warnings
