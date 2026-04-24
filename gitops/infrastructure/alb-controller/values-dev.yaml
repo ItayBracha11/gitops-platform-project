@@ -1,6 +1,6 @@
 clusterName: eks-gitops-demo-dev
 region: us-east-1
-vpcId: vpc-00045f6d641a95d89
+vpcId: vpc-09d3e293197af0759
 
 serviceAccount:
   create: false
