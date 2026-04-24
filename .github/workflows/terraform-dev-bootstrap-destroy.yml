@@ -87,7 +87,7 @@ jobs:
           ) &
           HEARTBEAT_PID=$!
 
-          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1
+          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 
           EXIT_CODE=$?
 
           kill $HEARTBEAT_PID || true
