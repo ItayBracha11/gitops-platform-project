@@ -50,15 +50,8 @@ jobs:
           ) &
           HEARTBEAT_PID=$!
 
-          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-cluster-destroy.log
+          terraform destroy -auto-approve -var-file=dev.tfvars -no-color -compact-warnings 2>&1 
           EXIT_CODE=${PIPESTATUS[0]}
 
           kill $HEARTBEAT_PID || true
           exit $EXIT_CODE
-
-      - name: Upload cluster destroy log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: terraform-dev-cluster-destroy-log
-          path: /tmp/terraform-cluster-destroy.log
