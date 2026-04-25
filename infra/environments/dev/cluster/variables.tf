@@ -1,36 +1,6 @@
 variable "aws_region" {
-  description = "AWS region for the dev environment"
+  description = "AWS region for the dev cluster"
   type        = string
-}
-
-variable "cidr_block" {
-  description = "CIDR block for the VPC"
-  type        = string
-}
-
-variable "public_subnet_cidrs" {
-  description = "List of public subnet CIDR blocks"
-  type        = list(string)
-}
-
-variable "private_subnet_cidrs" {
-  description = "List of private subnet CIDR blocks"
-  type        = list(string)
-}
-
-variable "azs" {
-  description = "Availability zones to use"
-  type        = list(string)
-}
-
-variable "enable_nat_gateway" {
-  description = "Whether to create NAT gateway(s)"
-  type        = bool
-}
-
-variable "nat_gateway_count" {
-  description = "Number of NAT gateways to create"
-  type        = number
 }
 
 variable "cluster_name" {
@@ -39,22 +9,22 @@ variable "cluster_name" {
 }
 
 variable "desired_size" {
-  description = "Desired node group size"
+  description = "Desired number of EKS worker nodes"
   type        = number
 }
 
 variable "min_size" {
-  description = "Minimum node group size"
+  description = "Minimum number of EKS worker nodes"
   type        = number
 }
 
 variable "max_size" {
-  description = "Maximum node group size"
+  description = "Maximum number of EKS worker nodes"
   type        = number
 }
 
 variable "instance_types" {
-  description = "EC2 instance types for the node group"
+  description = "EC2 instance types for the EKS managed node group"
   type        = list(string)
 }
 
@@ -64,7 +34,6 @@ variable "public_access_cidrs" {
 }
 
 variable "tags" {
-  description = "Common tags to apply to resources"
+  description = "Common tags for cluster resources"
   type        = map(string)
-  default     = {}
 }

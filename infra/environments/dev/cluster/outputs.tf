@@ -1,27 +1,29 @@
 output "cluster_name" {
-  value = module.eks.cluster_name
-}
-
-output "vpc_id" {
-  value = module.vpc.vpc_id
+  description = "EKS cluster name"
+  value       = module.eks.cluster_name
 }
 
 output "cluster_endpoint" {
-  value = module.eks.cluster_endpoint
+  description = "EKS cluster endpoint"
+  value       = module.eks.cluster_endpoint
 }
 
 output "cluster_certificate_authority_data" {
-  value = module.eks.cluster_certificate_authority_data
+  description = "EKS cluster certificate authority data"
+  value       = module.eks.cluster_certificate_authority_data
 }
 
 output "oidc_provider_arn" {
-  value = module.eks.oidc_provider_arn
+  description = "EKS OIDC provider ARN"
+  value       = module.eks.oidc_provider_arn
 }
 
 output "oidc_provider_url" {
-  value = module.eks.oidc_provider_url
+  description = "EKS OIDC provider URL"
+  value       = module.eks.oidc_provider_url
 }
 
-output "alb_controller_role_arn" {
-  value = module.iam.alb_controller_role_arn
+output "vpc_id" {
+  description = "VPC ID from network state"
+  value       = data.terraform_remote_state.network.outputs.vpc_id
 }

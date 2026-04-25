@@ -11,6 +11,7 @@ on:
       - 'infra/modules/**'
       - 'gitops/applications/dev/**'
       - '.github/workflows/terraform-dev-apply.yml'
+      - '.github/workflows/terraform-dev-network.yml'
       - '.github/workflows/terraform-dev-cluster.yml'
       - '.github/workflows/terraform-dev-platform.yml'
       - '.github/workflows/terraform-dev-bootstrap.yml'
@@ -29,11 +30,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     env:
-      CLUSTER_PATH_REGEX: '^(infra/environments/dev/cluster/|infra/modules/network/|infra/modules/compute/|infra/modules/security/|\.github/workflows/terraform-dev-cluster\.yml)'
+      NETWORK_PATH_REGEX: '^(infra/environments/dev/network/|infra/modules/network/|\.github/workflows/terraform-dev-network\.yml)'
+      CLUSTER_PATH_REGEX: '^(infra/environments/dev/cluster/|infra/modules/compute/|infra/modules/security/|\.github/workflows/terraform-dev-cluster\.yml)'
       PLATFORM_PATH_REGEX: '^(infra/environments/dev/platform/|infra/modules/platform/argocd/|\.github/workflows/terraform-dev-platform\.yml)'
       BOOTSTRAP_PATH_REGEX: '^(infra/environments/dev/bootstrap/|gitops/applications/dev/|\.github/workflows/terraform-dev-bootstrap\.yml)'
 
     outputs:
+      run_network: ${{ steps.set.outputs.run_network }}
       run_cluster: ${{ steps.set.outputs.run_cluster }}
       run_platform: ${{ steps.set.outputs.run_platform }}
       run_bootstrap: ${{ steps.set.outputs.run_bootstrap }}
@@ -51,6 +54,7 @@ jobs:
           set -euo pipefail
 
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "run_network=true" >> "$GITHUB_OUTPUT"
             echo "run_cluster=true" >> "$GITHUB_OUTPUT"
             echo "run_platform=true" >> "$GITHUB_OUTPUT"
             echo "run_bootstrap=true" >> "$GITHUB_OUTPUT"
@@ -59,11 +63,17 @@ jobs:
 
           FILES="$(git diff --name-only HEAD^ HEAD || true)"
 
+          run_network=false
           run_cluster=false
           run_platform=false
           run_bootstrap=false
 
-          if echo "$FILES" | grep -Eq "$CLUSTER_PATH_REGEX"; then
+          if echo "$FILES" | grep -Eq "$NETWORK_PATH_REGEX"; then
+            run_network=true
+            run_cluster=true
+            run_platform=true
+            run_bootstrap=true
+          elif echo "$FILES" | grep -Eq "$CLUSTER_PATH_REGEX"; then
             run_cluster=true
             run_platform=true
             run_bootstrap=true
@@ -74,14 +84,26 @@ jobs:
             run_bootstrap=true
           fi
 
+          echo "run_network=$run_network" >> "$GITHUB_OUTPUT"
           echo "run_cluster=$run_cluster" >> "$GITHUB_OUTPUT"
           echo "run_platform=$run_platform" >> "$GITHUB_OUTPUT"
           echo "run_bootstrap=$run_bootstrap" >> "$GITHUB_OUTPUT"
 
+  network:
+    name: Dev Network
+    needs: detect
+    if: needs.detect.outputs.run_network == 'true'
+    uses: ./.github/workflows/terraform-dev-network.yml
+    secrets: inherit
+
   cluster:
     name: Dev Cluster
-    needs: detect
-    if: needs.detect.outputs.run_cluster == 'true'
+    needs:
+      - detect
+      - network
+    if: |
+      needs.detect.outputs.run_cluster == 'true' &&
+      (needs.detect.outputs.run_network != 'true' || needs.network.result == 'success')
     uses: ./.github/workflows/terraform-dev-cluster.yml
     secrets: inherit
 
@@ -89,9 +111,11 @@ jobs:
     name: Dev Platform
     needs:
       - detect
+      - network
       - cluster
     if: |
       needs.detect.outputs.run_platform == 'true' &&
+      (needs.detect.outputs.run_network != 'true' || needs.network.result == 'success') &&
       (needs.detect.outputs.run_cluster != 'true' || needs.cluster.result == 'success')
     uses: ./.github/workflows/terraform-dev-platform.yml
     secrets: inherit
@@ -100,10 +124,12 @@ jobs:
     name: Dev Bootstrap
     needs:
       - detect
+      - network
       - cluster
       - platform
     if: |
       needs.detect.outputs.run_bootstrap == 'true' &&
+      (needs.detect.outputs.run_network != 'true' || needs.network.result == 'success') &&
       (needs.detect.outputs.run_cluster != 'true' || needs.cluster.result == 'success') &&
       (needs.detect.outputs.run_platform != 'true' || needs.platform.result == 'success')
     uses: ./.github/workflows/terraform-dev-bootstrap.yml

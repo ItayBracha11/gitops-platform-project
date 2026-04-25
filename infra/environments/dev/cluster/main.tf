@@ -1,17 +1,12 @@
-module "vpc" {
-  source = "../../../modules/network/vpc"
+data "terraform_remote_state" "network" {
+  backend = "s3"
 
-  cidr_block   = var.cidr_block
-  cluster_name = var.cluster_name
-
-  public_subnet_cidrs  = var.public_subnet_cidrs
-  private_subnet_cidrs = var.private_subnet_cidrs
-  azs                  = var.azs
-
-  enable_nat_gateway = var.enable_nat_gateway
-  nat_gateway_count  = var.nat_gateway_count
-
-  tags = var.tags
+  config = {
+    bucket         = "itay-project-terraform-state"
+    key            = "dev/network/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "terraform-locks"
+  }
 }
 
 module "eks" {
@@ -19,7 +14,7 @@ module "eks" {
 
   cluster_name = var.cluster_name
 
-  private_subnet_ids = module.vpc.private_subnet_ids
+  private_subnet_ids = data.terraform_remote_state.network.outputs.private_subnet_ids
 
   desired_size = var.desired_size
   min_size     = var.min_size
@@ -49,7 +44,7 @@ resource "local_file" "alb_values_dev" {
       role_arn     = module.iam.alb_controller_role_arn
       cluster_name = module.eks.cluster_name
       region       = var.aws_region
-      vpc_id       = module.vpc.vpc_id
+      vpc_id       = data.terraform_remote_state.network.outputs.vpc_id
     }
   )
 

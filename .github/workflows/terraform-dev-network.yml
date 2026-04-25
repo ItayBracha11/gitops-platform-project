@@ -1,0 +1,79 @@
+name: "[Terraform] Dev Network"
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  network:
+    name: Dev Network
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: infra/environments/dev/network
+
+    env:
+      TF_IN_AUTOMATION: true
+      AWS_REGION: us-east-1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Validate
+        run: terraform validate -no-color
+
+      - name: Terraform Apply
+        timeout-minutes: 45
+        run: |
+          set -euo pipefail
+
+          echo "::group::network apply"
+
+          (
+            while true; do
+              echo "=== terraform network apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+              sleep 60
+            done
+          ) &
+          HEARTBEAT_PID=$!
+
+          terraform apply \
+            -auto-approve \
+            -input=false \
+            -var-file=dev.tfvars \
+            -no-color \
+            -compact-warnings 2>&1 | tee /tmp/terraform-network.log
+
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          kill "$HEARTBEAT_PID" || true
+          echo "::endgroup::"
+          exit "$EXIT_CODE"
+
+      - name: Upload network log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-dev-network-log
+          path: /tmp/terraform-network.log

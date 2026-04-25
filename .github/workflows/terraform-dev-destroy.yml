@@ -21,8 +21,8 @@ jobs:
       AWS_REGION: us-east-1
 
     outputs:
-      vpc_id: ${{ steps.tf_outputs.outputs.vpc_id }}
-      cluster_name: ${{ steps.tf_outputs.outputs.cluster_name }}
+      vpc_id: ${{ steps.network_outputs.outputs.vpc_id }}
+      cluster_name: ${{ steps.cluster_outputs.outputs.cluster_name }}
       cluster_exists: ${{ steps.cluster_check.outputs.cluster_exists }}
 
     steps:
@@ -39,20 +39,32 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Terraform Init (cluster)
-        working-directory: infra/environments/dev/cluster
-        run: terraform init
+      - name: Terraform Init (network)
+        working-directory: infra/environments/dev/network
+        run: terraform init -input=false
 
-      - name: Read cluster state outputs
-        id: tf_outputs
-        working-directory: infra/environments/dev/cluster
+      - name: Read network state outputs
+        id: network_outputs
+        working-directory: infra/environments/dev/network
         run: |
           set -euo pipefail
 
           VPC_ID=$(terraform output -raw vpc_id)
-          CLUSTER_NAME=$(terraform output -raw cluster_name)
 
           echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform Init (cluster)
+        working-directory: infra/environments/dev/cluster
+        run: terraform init -input=false
+
+      - name: Read cluster state outputs
+        id: cluster_outputs
+        working-directory: infra/environments/dev/cluster
+        run: |
+          set -euo pipefail
+
+          CLUSTER_NAME=$(terraform output -raw cluster_name)
+
           echo "cluster_name=$CLUSTER_NAME" >> "$GITHUB_OUTPUT"
 
       - name: Check whether cluster still exists
@@ -61,7 +73,7 @@ jobs:
           set -euo pipefail
 
           if aws eks describe-cluster \
-            --name "${{ steps.tf_outputs.outputs.cluster_name }}" \
+            --name "${{ steps.cluster_outputs.outputs.cluster_name }}" \
             --region "$AWS_REGION" >/dev/null 2>&1; then
             echo "cluster_exists=true" >> "$GITHUB_OUTPUT"
           else
@@ -139,28 +151,6 @@ jobs:
 
           echo "Timed out waiting for ALB cleanup"
           exit 1
-      
-      - name: Delete leftover LB security groups
-        run: |
-          set -euo pipefail
-
-          SG_IDS=$(aws ec2 describe-security-groups \
-            --region "$AWS_REGION" \
-            --filters Name=vpc-id,Values="$VPC_ID" \
-            --query "SecurityGroups[?GroupName!='default' && contains(GroupName, 'k8s-traffic-')].GroupId" \
-            --output text)
-
-          if [ -z "$SG_IDS" ]; then
-            echo "No leftover LB security groups found"
-            exit 0
-          fi
-
-          for SG_ID in $SG_IDS; do
-            echo "Deleting leftover LB security group: $SG_ID"
-            aws ec2 delete-security-group \
-              --region "$AWS_REGION" \
-              --group-id "$SG_ID"
-          done
 
   platform:
     name: Dev Platform Destroy
@@ -187,4 +177,54 @@ jobs:
         (needs.prepare-destroy-context.outputs.cluster_exists == 'false' && needs.cleanup-aws-lb-resources.result == 'success')
       )
     uses: ./.github/workflows/terraform-dev-cluster-destroy.yml
+    secrets: inherit
+
+  cleanup-leftover-k8s-security-groups:
+    name: Clean up leftover k8s security groups
+    runs-on: ubuntu-24.04
+    needs:
+      - prepare-destroy-context
+      - cluster
+    if: needs.cluster.result == 'success'
+
+    env:
+      AWS_REGION: us-east-1
+      VPC_ID: ${{ needs.prepare-destroy-context.outputs.vpc_id }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete leftover k8s security groups
+        run: |
+          set -euo pipefail
+
+          SG_IDS=$(aws ec2 describe-security-groups \
+            --region "$AWS_REGION" \
+            --filters Name=vpc-id,Values="$VPC_ID" \
+            --query "SecurityGroups[?GroupName!='default' && starts_with(GroupName, 'k8s-')].GroupId" \
+            --output text)
+
+          if [ -z "$SG_IDS" ]; then
+            echo "No leftover k8s security groups found"
+            exit 0
+          fi
+
+          for SG_ID in $SG_IDS; do
+            echo "Deleting leftover k8s security group: $SG_ID"
+            aws ec2 delete-security-group \
+              --region "$AWS_REGION" \
+              --group-id "$SG_ID"
+          done
+
+  network:
+    name: Dev Network Destroy
+    needs:
+      - cleanup-leftover-k8s-security-groups
+    if: needs.cleanup-leftover-k8s-security-groups.result == 'success'
+    uses: ./.github/workflows/terraform-dev-network-destroy.yml
     secrets: inherit
