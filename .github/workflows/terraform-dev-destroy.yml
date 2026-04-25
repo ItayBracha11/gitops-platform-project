@@ -77,8 +77,8 @@ jobs:
     uses: ./.github/workflows/terraform-dev-bootstrap-destroy.yml
     secrets: inherit
 
-  wait-for-aws-cleanup:
-    name: Wait for AWS LB cleanup
+  cleanup-aws-lb-resources:
+    name: Clean up AWS LB resources
     runs-on: ubuntu-24.04
     needs:
       - prepare-destroy-context
@@ -106,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for i in $(seq 1 40); do
+          for i in $(seq 1 20); do
             echo "Check #$i for VPC $VPC_ID"
 
             LB_COUNT=$(aws elbv2 describe-load-balancers \
@@ -134,21 +134,43 @@ jobs:
               exit 0
             fi
 
-            sleep 30
+            sleep 15
           done
 
           echo "Timed out waiting for ALB cleanup"
           exit 1
+      
+      - name: Delete leftover LB security groups
+        run: |
+          set -euo pipefail
+
+          SG_IDS=$(aws ec2 describe-security-groups \
+            --region "$AWS_REGION" \
+            --filters Name=vpc-id,Values="$VPC_ID" \
+            --query "SecurityGroups[?GroupName!='default' && contains(GroupName, 'k8s-traffic-')].GroupId" \
+            --output text)
+
+          if [ -z "$SG_IDS" ]; then
+            echo "No leftover LB security groups found"
+            exit 0
+          fi
+
+          for SG_ID in $SG_IDS; do
+            echo "Deleting leftover LB security group: $SG_ID"
+            aws ec2 delete-security-group \
+              --region "$AWS_REGION" \
+              --group-id "$SG_ID"
+          done
 
   platform:
     name: Dev Platform Destroy
     needs:
       - prepare-destroy-context
-      - wait-for-aws-cleanup
+      - cleanup-aws-lb-resources
     if: |
       needs.prepare-destroy-context.result == 'success' &&
       needs.prepare-destroy-context.outputs.cluster_exists == 'true' &&
-      needs.wait-for-aws-cleanup.result == 'success'
+      needs.cleanup-aws-lb-resources.result == 'success'
     uses: ./.github/workflows/terraform-dev-platform-destroy.yml
     secrets: inherit
 
@@ -156,13 +178,13 @@ jobs:
     name: Dev Cluster Destroy
     needs:
       - prepare-destroy-context
-      - wait-for-aws-cleanup
+      - cleanup-aws-lb-resources
       - platform
     if: |
       needs.prepare-destroy-context.result == 'success' &&
       (
         (needs.prepare-destroy-context.outputs.cluster_exists == 'true' && needs.platform.result == 'success') ||
-        (needs.prepare-destroy-context.outputs.cluster_exists == 'false' && needs.wait-for-aws-cleanup.result == 'success')
+        (needs.prepare-destroy-context.outputs.cluster_exists == 'false' && needs.cleanup-aws-lb-resources.result == 'success')
       )
     uses: ./.github/workflows/terraform-dev-cluster-destroy.yml
     secrets: inherit
