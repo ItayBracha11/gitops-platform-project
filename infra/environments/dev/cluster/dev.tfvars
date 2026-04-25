@@ -7,8 +7,6 @@ max_size     = 2
 
 instance_types = ["t3.small"]
 
-public_access_cidrs = ["0.0.0.0/0"]
-
 tags = {
   Project     = "gitops-platform"
   Environment = "dev"
