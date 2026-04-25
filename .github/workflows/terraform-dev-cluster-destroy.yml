@@ -90,9 +90,33 @@ jobs:
         run: |
           set -euo pipefail
 
-          terraform destroy \
-            -auto-approve \
-            -input=false \
-            -var-file=dev.tfvars \
-            -no-color \
-            -compact-warnings
+          MAX_ATTEMPTS=3
+          SLEEP_SECONDS=120
+
+          for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+            echo "=== Terraform destroy attempt ${ATTEMPT}/${MAX_ATTEMPTS} ==="
+
+            set +e
+            terraform destroy \
+              -auto-approve \
+              -input=false \
+              -var-file=dev.tfvars \
+              -no-color \
+              -compact-warnings
+            EXIT_CODE=$?
+            set -e
+
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              echo "Terraform destroy completed successfully"
+              exit 0
+            fi
+
+            if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
+              echo "Terraform destroy failed after ${MAX_ATTEMPTS} attempts"
+              exit "$EXIT_CODE"
+            fi
+
+            echo "Terraform destroy failed with exit code ${EXIT_CODE}."
+            echo "Waiting ${SLEEP_SECONDS}s before retrying, in case AWS dependencies are still settling..."
+            sleep "$SLEEP_SECONDS"
+          done
