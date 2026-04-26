@@ -74,7 +74,7 @@ jobs:
 
           if aws eks describe-cluster \
             --name "${{ steps.cluster_outputs.outputs.cluster_name }}" \
-            --region "$AWS_REGION" >/prod/null 2>&1; then
+            --region "$AWS_REGION" >/dev/null 2>&1; then
             echo "cluster_exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "cluster_exists=false" >> "$GITHUB_OUTPUT"

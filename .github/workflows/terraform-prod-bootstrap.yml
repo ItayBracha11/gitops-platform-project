@@ -100,7 +100,7 @@ jobs:
 
           for i in $(seq 1 30); do
             ADDRESS=$(kubectl get ingress demo-app -n demo-app \
-              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/prod/null || true)
+              -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
 
             if [ -n "$ADDRESS" ]; then
               echo ""
