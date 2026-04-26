@@ -1,1 +1,9 @@
-iamRoleArn: ""
+clusterName: eks-gitops-demo-prod
+region: eu-west-1
+vpcId: vpc-00ff71facc1649cb1
+
+serviceAccount:
+  create: false
+  name: aws-load-balancer-controller
+
+iamRoleArn: arn:aws:iam::111310799979:role/eks-gitops-demo-prod-alb-controller-role
