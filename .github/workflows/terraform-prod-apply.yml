@@ -1,0 +1,49 @@
+name: "[Terraform] Prod Apply"
+
+run-name: "[Terraform] Prod Apply"
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infra/environments/prod/**'
+      - 'infra/modules/**'
+      - 'gitops/applications/prod/**'
+      - '.github/workflows/terraform-prod-apply.yml'
+      - '.github/workflows/terraform-prod-network.yml'
+      - '.github/workflows/terraform-prod-cluster.yml'
+      - '.github/workflows/terraform-prod-platform.yml'
+      - '.github/workflows/terraform-prod-bootstrap.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: terraform-prod-apply
+  cancel-in-progress: false
+
+jobs:
+  network:
+    name: Prod Network
+    uses: ./.github/workflows/terraform-prod-network.yml
+    secrets: inherit
+
+  cluster:
+    name: Prod Cluster
+    needs: network
+    uses: ./.github/workflows/terraform-prod-cluster.yml
+    secrets: inherit
+
+  platform:
+    name: Prod Platform
+    needs: cluster
+    uses: ./.github/workflows/terraform-prod-platform.yml
+    secrets: inherit
+
+  bootstrap:
+    name: Prod Bootstrap
+    needs: platform
+    uses: ./.github/workflows/terraform-prod-bootstrap.yml
+    secrets: inherit

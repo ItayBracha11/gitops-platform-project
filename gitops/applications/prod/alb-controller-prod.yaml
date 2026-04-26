@@ -9,17 +9,17 @@ metadata:
 spec:
   project: default
 
-  source:
-    repoURL: https://aws.github.io/eks-charts
-    chart: aws-load-balancer-controller
-    targetRevision: 1.6.2
+  sources:
+    - repoURL: https://aws.github.io/eks-charts
+      chart: aws-load-balancer-controller
+      targetRevision: 1.6.2
+      helm:
+        valueFiles:
+          - $values/gitops/infrastructure/alb-controller/values-prod.yaml
 
-    helm:
-      values: |
-        clusterName: "eks-gitops-demo-prod"
-        serviceAccount:
-          create: false
-          name: aws-load-balancer-controller
+    - repoURL: https://github.com/ItayBracha11/gitops-platform-project.git
+      targetRevision: HEAD
+      ref: values
 
   destination:
     server: https://kubernetes.default.svc

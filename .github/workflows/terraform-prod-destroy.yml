@@ -1,0 +1,230 @@
+name: "[Terraform] Prod Destroy"
+
+run-name: "[Terraform] Prod Destroy"
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: terraform-prod-destroy
+  cancel-in-progress: false
+
+jobs:
+  prepare-destroy-context:
+    name: Prepare destroy context
+    runs-on: ubuntu-24.04
+
+    env:
+      AWS_REGION: eu-west-1
+
+    outputs:
+      vpc_id: ${{ steps.network_outputs.outputs.vpc_id }}
+      cluster_name: ${{ steps.cluster_outputs.outputs.cluster_name }}
+      cluster_exists: ${{ steps.cluster_check.outputs.cluster_exists }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init (network)
+        working-directory: infra/environments/prod/network
+        run: terraform init -input=false
+
+      - name: Read network state outputs
+        id: network_outputs
+        working-directory: infra/environments/prod/network
+        run: |
+          set -euo pipefail
+
+          VPC_ID=$(terraform output -raw vpc_id)
+
+          echo "vpc_id=$VPC_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Terraform Init (cluster)
+        working-directory: infra/environments/prod/cluster
+        run: terraform init -input=false
+
+      - name: Read cluster state outputs
+        id: cluster_outputs
+        working-directory: infra/environments/prod/cluster
+        run: |
+          set -euo pipefail
+
+          CLUSTER_NAME=$(terraform output -raw cluster_name)
+
+          echo "cluster_name=$CLUSTER_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether cluster still exists
+        id: cluster_check
+        run: |
+          set -euo pipefail
+
+          if aws eks describe-cluster \
+            --name "${{ steps.cluster_outputs.outputs.cluster_name }}" \
+            --region "$AWS_REGION" >/prod/null 2>&1; then
+            echo "cluster_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "cluster_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  bootstrap:
+    name: Prod Bootstrap Destroy
+    needs: prepare-destroy-context
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      needs.prepare-destroy-context.outputs.cluster_exists == 'true'
+    uses: ./.github/workflows/terraform-prod-bootstrap-destroy.yml
+    secrets: inherit
+
+  cleanup-aws-lb-resources:
+    name: Clean up AWS LB resources
+    runs-on: ubuntu-24.04
+    needs:
+      - prepare-destroy-context
+      - bootstrap
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      (
+        needs.prepare-destroy-context.outputs.cluster_exists == 'false' ||
+        needs.bootstrap.result == 'success'
+      )
+
+    env:
+      AWS_REGION: eu-west-1
+      VPC_ID: ${{ needs.prepare-destroy-context.outputs.vpc_id }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Wait until ALB resources are gone
+        run: |
+          set -euo pipefail
+
+          for i in $(seq 1 20); do
+            echo "Check #$i for VPC $VPC_ID"
+
+            LB_COUNT=$(aws elbv2 describe-load-balancers \
+              --region "$AWS_REGION" \
+              --query "LoadBalancers[?VpcId=='${VPC_ID}'] | length(@)" \
+              --output text)
+
+            TG_COUNT=$(aws elbv2 describe-target-groups \
+              --region "$AWS_REGION" \
+              --query "TargetGroups[?VpcId=='${VPC_ID}'] | length(@)" \
+              --output text)
+
+            ENI_COUNT=$(aws ec2 describe-network-interfaces \
+              --region "$AWS_REGION" \
+              --filters Name=vpc-id,Values="${VPC_ID}" \
+              --query "NetworkInterfaces[?Attachment.InstanceOwnerId=='amazon-elb'] | length(@)" \
+              --output text)
+
+            echo "Load balancers: $LB_COUNT"
+            echo "Target groups:  $TG_COUNT"
+            echo "ELB ENIs:       $ENI_COUNT"
+
+            if [ "$LB_COUNT" = "0" ] && [ "$TG_COUNT" = "0" ] && [ "$ENI_COUNT" = "0" ]; then
+              echo "AWS LB cleanup complete"
+              exit 0
+            fi
+
+            sleep 15
+          done
+
+          echo "Timed out waiting for ALB cleanup"
+          exit 1
+
+  platform:
+    name: Prod Platform Destroy
+    needs:
+      - prepare-destroy-context
+      - cleanup-aws-lb-resources
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      needs.prepare-destroy-context.outputs.cluster_exists == 'true' &&
+      needs.cleanup-aws-lb-resources.result == 'success'
+    uses: ./.github/workflows/terraform-prod-platform-destroy.yml
+    secrets: inherit
+
+  cluster:
+    name: Prod Cluster Destroy
+    needs:
+      - prepare-destroy-context
+      - cleanup-aws-lb-resources
+      - platform
+    if: |
+      needs.prepare-destroy-context.result == 'success' &&
+      (
+        (needs.prepare-destroy-context.outputs.cluster_exists == 'true' && needs.platform.result == 'success') ||
+        (needs.prepare-destroy-context.outputs.cluster_exists == 'false' && needs.cleanup-aws-lb-resources.result == 'success')
+      )
+    uses: ./.github/workflows/terraform-prod-cluster-destroy.yml
+    secrets: inherit
+
+  cleanup-leftover-k8s-security-groups:
+    name: Clean up leftover k8s security groups
+    runs-on: ubuntu-24.04
+    needs:
+      - prepare-destroy-context
+      - cluster
+    if: needs.cluster.result == 'success'
+
+    env:
+      AWS_REGION: eu-west-1
+      VPC_ID: ${{ needs.prepare-destroy-context.outputs.vpc_id }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete leftover k8s security groups
+        run: |
+          set -euo pipefail
+
+          SG_IDS=$(aws ec2 describe-security-groups \
+            --region "$AWS_REGION" \
+            --filters Name=vpc-id,Values="$VPC_ID" \
+            --query "SecurityGroups[?GroupName!='default' && starts_with(GroupName, 'k8s-')].GroupId" \
+            --output text)
+
+          if [ -z "$SG_IDS" ]; then
+            echo "No leftover k8s security groups found"
+            exit 0
+          fi
+
+          for SG_ID in $SG_IDS; do
+            echo "Deleting leftover k8s security group: $SG_ID"
+            aws ec2 delete-security-group \
+              --region "$AWS_REGION" \
+              --group-id "$SG_ID"
+          done
+
+  network:
+    name: Prod Network Destroy
+    needs:
+      - cleanup-leftover-k8s-security-groups
+    if: needs.cleanup-leftover-k8s-security-groups.result == 'success'
+    uses: ./.github/workflows/terraform-prod-network-destroy.yml
+    secrets: inherit

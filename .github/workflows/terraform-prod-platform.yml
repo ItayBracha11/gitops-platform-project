@@ -1,0 +1,93 @@
+name: "[Terraform] Prod Platform"
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  platform:
+    name: Prod Platform
+    runs-on: ubuntu-24.04
+
+    env:
+      TF_IN_AUTOMATION: true
+      AWS_REGION: eu-west-1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect runner public IP
+        id: runner_ip
+        run: |
+          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
+          echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
+          echo "Runner public IP is ${IP}/32"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init (cluster)
+        working-directory: infra/environments/prod/cluster
+        run: terraform init
+
+      - name: Refresh cluster access CIDR for this runner
+        working-directory: infra/environments/prod/cluster
+        timeout-minutes: 15
+        env:
+          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
+        run: |
+          set -euo pipefail
+          echo "::group::cluster access refresh"
+          terraform apply -auto-approve -var-file=prod.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-platform-cluster-refresh.log
+          echo "::endgroup::"
+
+      - name: Terraform Init (platform)
+        working-directory: infra/environments/prod/platform
+        run: terraform init
+
+      - name: Terraform Validate (platform)
+        working-directory: infra/environments/prod/platform
+        run: terraform validate -no-color
+
+      - name: Terraform Apply (platform)
+        working-directory: infra/environments/prod/platform
+        timeout-minutes: 30
+        run: |
+          set -euo pipefail
+
+          echo "::group::platform apply"
+
+          (
+            while true; do
+              echo "=== terraform platform apply still running: $(date -u +%Y-%m-%dT%H:%M:%SZ) ==="
+              sleep 60
+            done
+          ) &
+          HEARTBEAT_PID=$!
+
+          terraform apply -auto-approve -var-file=prod.tfvars -no-color -compact-warnings 2>&1 | tee /tmp/terraform-platform.log
+          EXIT_CODE=${PIPESTATUS[0]}
+
+          kill $HEARTBEAT_PID || true
+          echo "::endgroup::"
+          exit $EXIT_CODE
+
+      - name: Upload platform logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-prod-platform-logs
+          path: |
+            /tmp/terraform-platform-cluster-refresh.log
+            /tmp/terraform-platform.log

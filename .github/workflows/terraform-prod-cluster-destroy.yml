@@ -1,0 +1,122 @@
+name: "[Terraform] Prod Cluster Destroy"
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cluster-destroy:
+    name: Prod Cluster Destroy
+    runs-on: ubuntu-24.04
+
+    defaults:
+      run:
+        working-directory: infra/environments/prod/cluster
+
+    env:
+      TF_IN_AUTOMATION: true
+      AWS_REGION: eu-west-1
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect runner public IP
+        id: runner_ip
+        run: |
+          set -euo pipefail
+          IP=$(curl -s https://checkip.amazonaws.com | tr -d '\n')
+          echo "cidr=[\"${IP}/32\"]" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Show cluster destroy context
+        env:
+          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
+        run: |
+          set -euo pipefail
+
+          VPC_ID=$(terraform output -raw vpc_id || true)
+          CLUSTER_NAME=$(terraform output -raw cluster_name || true)
+
+          echo "Cluster: $CLUSTER_NAME"
+          echo "VPC: $VPC_ID"
+
+          echo "EKS cluster:"
+          aws eks describe-cluster \
+            --name "$CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --query 'cluster.{status:status,endpoint:endpoint}' \
+            --output table || true
+
+          echo "Node groups:"
+          aws eks list-nodegroups \
+            --cluster-name "$CLUSTER_NAME" \
+            --region "$AWS_REGION" \
+            --output table || true
+
+          echo "NAT gateways:"
+          aws ec2 describe-nat-gateways \
+            --region "$AWS_REGION" \
+            --filter Name=vpc-id,Values="$VPC_ID" \
+            --query 'NatGateways[*].{Id:NatGatewayId,State:State,Subnet:SubnetId}' \
+            --output table || true
+
+          echo "Network interfaces:"
+          aws ec2 describe-network-interfaces \
+            --region "$AWS_REGION" \
+            --filters Name=vpc-id,Values="$VPC_ID" \
+            --query 'NetworkInterfaces[*].{Id:NetworkInterfaceId,Status:Status,Desc:Description,Owner:RequesterId,AttachmentOwner:Attachment.InstanceOwnerId,Subnet:SubnetId,PublicIp:Association.PublicIp}' \
+            --output table || true
+
+      - name: Terraform Destroy
+        timeout-minutes: 90
+        env:
+          TF_VAR_public_access_cidrs: ${{ steps.runner_ip.outputs.cidr }}
+        run: |
+          set -euo pipefail
+
+          MAX_ATTEMPTS=3
+          SLEEP_SECONDS=120
+
+          for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+            echo "=== Terraform destroy attempt ${ATTEMPT}/${MAX_ATTEMPTS} ==="
+
+            set +e
+            terraform destroy \
+              -auto-approve \
+              -input=false \
+              -var-file=prod.tfvars \
+              -no-color \
+              -compact-warnings
+            EXIT_CODE=$?
+            set -e
+
+            if [ "$EXIT_CODE" -eq 0 ]; then
+              echo "Terraform destroy completed successfully"
+              exit 0
+            fi
+
+            if [ "$ATTEMPT" -eq "$MAX_ATTEMPTS" ]; then
+              echo "Terraform destroy failed after ${MAX_ATTEMPTS} attempts"
+              exit "$EXIT_CODE"
+            fi
+
+            echo "Terraform destroy failed with exit code ${EXIT_CODE}."
+            echo "Waiting ${SLEEP_SECONDS}s before retrying, in case AWS dependencies are still settling..."
+            sleep "$SLEEP_SECONDS"
+          done
