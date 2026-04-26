@@ -15,6 +15,7 @@ jobs:
     env:
       TF_IN_AUTOMATION: true
       AWS_REGION: us-east-1
+      CLUSTER_NAME: eks-gitops-demo-dev
 
     steps:
       - name: Checkout repository
@@ -86,8 +87,6 @@ jobs:
       - name: Configure kubeconfig
         run: |
           set -euo pipefail
-
-          CLUSTER_NAME=$(terraform -chdir=../cluster output -raw cluster_name)
 
           aws eks update-kubeconfig \
             --region "$AWS_REGION" \
