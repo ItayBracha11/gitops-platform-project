@@ -2,7 +2,6 @@ name: "[Terraform] Dev Network Destroy"
 
 on:
   workflow_call:
-  workflow_dispatch:
 
 permissions:
   contents: read
