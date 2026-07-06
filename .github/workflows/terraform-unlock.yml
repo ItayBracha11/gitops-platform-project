@@ -41,7 +41,7 @@ jobs:
           set -euo pipefail
 
           for STACK in network cluster platform bootstrap; do
-            LOCK_ID="${S3_BUCKET}/${ENVIRONMENT}/${STACK}/terraform.tfstate-md5"
+            LOCK_ID="${S3_BUCKET}/${ENVIRONMENT}/${STACK}/terraform.tfstate"
 
             echo "=== $STACK ($LOCK_ID) ==="
 
