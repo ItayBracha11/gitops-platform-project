@@ -1,0 +1,79 @@
+name: "[Terraform] Force Unlock All State"
+
+run-name: "[Terraform] Force Unlock All State — ${{ inputs.environment }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment whose Terraform state locks should be cleared (network, cluster, platform, bootstrap — all at once)"
+        required: true
+        type: choice
+        options:
+          - dev
+          - prod
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  force-unlock:
+    name: Force unlock all ${{ inputs.environment }} stacks
+    runs-on: ubuntu-24.04
+
+    env:
+      AWS_REGION: ${{ inputs.environment == 'prod' && 'eu-west-1' || 'us-east-1' }}
+      DYNAMODB_TABLE: terraform-locks
+      S3_BUCKET: itay-project-terraform-state
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete lock item for every stack
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+
+          for STACK in network cluster platform bootstrap; do
+            LOCK_ID="${S3_BUCKET}/${ENVIRONMENT}/${STACK}/terraform.tfstate-md5"
+
+            echo "=== $STACK ($LOCK_ID) ==="
+
+            ITEM=$(aws dynamodb get-item \
+              --table-name "$DYNAMODB_TABLE" \
+              --region "$AWS_REGION" \
+              --key "{\"LockID\": {\"S\": \"$LOCK_ID\"}}" \
+              --output json)
+
+            if ! echo "$ITEM" | grep -q '"Item"'; then
+              echo "no lock held"
+              continue
+            fi
+
+            echo "lock held, deleting:"
+            echo "$ITEM"
+
+            aws dynamodb delete-item \
+              --table-name "$DYNAMODB_TABLE" \
+              --region "$AWS_REGION" \
+              --key "{\"LockID\": {\"S\": \"$LOCK_ID\"}}"
+
+            echo "deleted"
+          done
+      - name: Scan remaining locks
+        if: always()
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          echo "=== Remaining locks in table ==="
+          aws dynamodb scan \
+            --table-name "$DYNAMODB_TABLE" \
+            --region "$AWS_REGION" \
+            --query "Items[*].LockID.S" \
+            --output table
