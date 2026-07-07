@@ -219,10 +219,85 @@ jobs:
               --group-id "$SG_ID"
           done
 
+  cleanup-guardduty-resources:
+    name: Clean up GuardDuty-managed VPC endpoint and security group
+    runs-on: ubuntu-24.04
+    needs:
+      - prepare-destroy-context
+      - cluster
+    if: needs.cluster.result == 'success'
+
+    env:
+      AWS_REGION: eu-west-1
+      VPC_ID: ${{ needs.prepare-destroy-context.outputs.vpc_id }}
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Delete GuardDuty-managed VPC endpoint and security group
+        run: |
+          set -euo pipefail
+
+          ENDPOINT_IDS=$(aws ec2 describe-vpc-endpoints \
+            --region "$AWS_REGION" \
+            --filters Name=vpc-id,Values="$VPC_ID" Name=tag:GuardDutyManaged,Values=true \
+            --query "VpcEndpoints[].VpcEndpointId" \
+            --output text)
+
+          if [ -z "$ENDPOINT_IDS" ]; then
+            echo "No GuardDuty-managed VPC endpoints found"
+            exit 0
+          fi
+
+          echo "Found GuardDuty-managed VPC endpoint(s): $ENDPOINT_IDS"
+
+          SG_IDS=$(aws ec2 describe-vpc-endpoints \
+            --region "$AWS_REGION" \
+            --vpc-endpoint-ids $ENDPOINT_IDS \
+            --query "VpcEndpoints[].Groups[].GroupId" \
+            --output text)
+
+          aws ec2 delete-vpc-endpoints \
+            --region "$AWS_REGION" \
+            --vpc-endpoint-ids $ENDPOINT_IDS
+
+          if [ -z "$SG_IDS" ]; then
+            exit 0
+          fi
+
+          echo "Waiting for GuardDuty endpoint ENIs to detach before deleting security group(s): $SG_IDS"
+          for i in $(seq 1 20); do
+            ENI_COUNT=$(aws ec2 describe-network-interfaces \
+              --region "$AWS_REGION" \
+              --filters Name=group-id,Values=$SG_IDS \
+              --query "length(NetworkInterfaces)" \
+              --output text)
+
+            if [ "$ENI_COUNT" = "0" ]; then
+              break
+            fi
+
+            sleep 15
+          done
+
+          for SG_ID in $SG_IDS; do
+            echo "Deleting GuardDuty-managed security group: $SG_ID"
+            aws ec2 delete-security-group \
+              --region "$AWS_REGION" \
+              --group-id "$SG_ID"
+          done
+
   network:
     name: Prod Network Destroy
     needs:
       - cleanup-leftover-k8s-security-groups
-    if: needs.cleanup-leftover-k8s-security-groups.result == 'success'
+      - cleanup-guardduty-resources
+    if: |
+      needs.cleanup-leftover-k8s-security-groups.result == 'success' &&
+      needs.cleanup-guardduty-resources.result == 'success'
     uses: ./.github/workflows/terraform-prod-network-destroy.yml
     secrets: inherit

@@ -242,11 +242,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          # GuardDuty (EKS Runtime Monitoring, automated agent) creates a VPC endpoint
-          # and security group outside Terraform/EKS. There's no documented name prefix
-          # for the security group, but GuardDuty does tag the endpoint it creates with
-          # GuardDutyManaged=true, so find the endpoint by tag and derive the security
-          # group from what's attached to it.
           ENDPOINT_IDS=$(aws ec2 describe-vpc-endpoints \
             --region "$AWS_REGION" \
             --filters Name=vpc-id,Values="$VPC_ID" Name=tag:GuardDutyManaged,Values=true \
