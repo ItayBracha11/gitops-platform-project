@@ -3,7 +3,7 @@ data "terraform_remote_state" "cluster" {
 
   config = {
     bucket         = "itay-project-terraform-state"
-    key            = "prod/cluster.tfstate"
+    key            = "prod/cluster/terraform.tfstate"
     region         = "us-east-1"
     dynamodb_table = "terraform-locks"
   }
@@ -14,7 +14,7 @@ data "terraform_remote_state" "platform" {
 
   config = {
     bucket         = "itay-project-terraform-state"
-    key            = "prod/platform.tfstate"
+    key            = "prod/platform/terraform.tfstate"
     region         = "us-east-1"
     dynamodb_table = "terraform-locks"
   }
