@@ -4,6 +4,11 @@ run-name: "[Terraform] Bootstrap Backend"
 
 on:
   workflow_dispatch:
+    inputs:
+      apply:
+        description: "Apply after plan (untick to review the plan only)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -21,6 +26,8 @@ jobs:
     env:
       TF_IN_AUTOMATION: true
       AWS_REGION: us-east-1
+      S3_BUCKET: itay-project-terraform-state
+      DYNAMODB_TABLE: terraform-locks
 
     steps:
       - name: Checkout repository
@@ -44,8 +51,38 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
+      # This root has no backend, so state is lost after every run.
+      # Import whatever already exists so re-runs don't try to create it again.
+      - name: Adopt existing backend resources
+        run: |
+          set -euo pipefail
+          TF_IMPORT="terraform import -input=false -no-color -var-file=bootstrap.tfvars"
+
+          if aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
+            echo "Bucket $S3_BUCKET exists, importing"
+            $TF_IMPORT aws_s3_bucket.terraform_state "$S3_BUCKET"
+            $TF_IMPORT aws_s3_bucket_server_side_encryption_configuration.encryption "$S3_BUCKET"
+
+            VERSIONING=$(aws s3api get-bucket-versioning --bucket "$S3_BUCKET" --query Status --output text)
+            if [ "$VERSIONING" = "Enabled" ] || [ "$VERSIONING" = "Suspended" ]; then
+              $TF_IMPORT aws_s3_bucket_versioning.versioning "$S3_BUCKET"
+            else
+              echo "Versioning never configured, Terraform will create it"
+            fi
+          else
+            echo "Bucket $S3_BUCKET not found, Terraform will create it"
+          fi
+
+          if aws dynamodb describe-table --table-name "$DYNAMODB_TABLE" >/dev/null 2>&1; then
+            echo "Table $DYNAMODB_TABLE exists, importing"
+            $TF_IMPORT aws_dynamodb_table.terraform_locks "$DYNAMODB_TABLE"
+          else
+            echo "Table $DYNAMODB_TABLE not found, Terraform will create it"
+          fi
+
       - name: Terraform Plan
         run: terraform plan -var-file=bootstrap.tfvars
 
       - name: Terraform Apply
+        if: ${{ inputs.apply }}
         run: terraform apply -auto-approve -var-file=bootstrap.tfvars
