@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "required": ["verdict", "summary", "findings"],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["low", "medium", "high"] },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["resource", "action", "risk", "why"],
+        "properties": {
+          "resource": { "type": "string" },
+          "action": { "type": "string" },
+          "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+          "why": { "type": "string" }
+        }
+      }
+    }
+  }
+}

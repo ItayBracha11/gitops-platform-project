@@ -19,6 +19,8 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 *.tfplan
+tfplan
+plan-*.txt
 
 # Ignore lock info, CLI config
 .terraform.tfstate.lock.info

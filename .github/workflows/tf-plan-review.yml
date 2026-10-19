@@ -1,0 +1,94 @@
+name: TF Plan Review
+on:
+  pull_request:
+    paths:
+      - 'infra/environments/dev/network/**'
+      - 'infra/modules/network/**'
+
+permissions: {}                    # nothing by default; each job asks for its own
+
+concurrency:
+  group: tf-plan-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:                            # deterministic, privileged (AWS read-only)
+    runs-on: ubuntu-24.04
+    environment: tf-plan           # the only job the AWS role trusts
+    permissions:
+      contents: read
+      id-token: write              # OIDC to AWS, no static keys
+    defaults:
+      run:
+        working-directory: infra/environments/dev/network
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+      - run: terraform init -input=false
+      - run: terraform plan -input=false -lock=false -var-file=dev.tfvars -out=tfplan
+      - name: Text plan for the agent (sensitive values masked)
+        run: terraform show -no-color tfplan > plan-network.txt
+      - name: Hard gate, no LLM
+        run: |
+          terraform show -json tfplan > /tmp/plan.json   # holds secrets in plain text: never leaves this job
+          DELETES=$(jq '[.resource_changes[] | select(.change.actions | index("delete"))] | length' /tmp/plan.json)
+          if [ "$DELETES" -gt 0 ]; then echo "::warning::Plan deletes or replaces $DELETES resource(s)"; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plan
+          path: infra/environments/dev/network/plan-network.txt
+
+  review:                          # agentic, unprivileged
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read               # no AWS, no write token
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # no git token left on disk for the agent to find
+      - uses: actions/download-artifact@v4
+        with:
+          name: plan
+      - run: npm install -g @anthropic-ai/claude-code
+      - name: Agent reviews the plan
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          claude -p "/tf-plan-review plan-network.txt" \
+            --settings .github/claude/ci-settings.json \
+            --permission-mode dontAsk \
+            --max-turns 10 \
+            --output-format json \
+            --json-schema "$(cat .github/claude/review-schema.json)" \
+            > result.json
+          echo "cost_usd=$(jq '.total_cost_usd' result.json)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review
+          path: result.json
+
+  publish:                         # deterministic, the only writer
+    needs: review
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: review
+      - name: Post the review as a PR comment
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          jq -r '.structured_output |
+            "### Terraform plan review: \(.verdict)\n\n\(.summary)\n\n| Resource | Action | Risk | Why |\n|---|---|---|---|\n"
+            + ([.findings[] | "| \(.resource) | \(.action) | \(.risk) | \(.why) |"] | join("\n"))' \
+            result.json > comment.md
+          gh pr comment ${{ github.event.pull_request.number }} \
+            --repo ${{ github.repository }} --body-file comment.md
