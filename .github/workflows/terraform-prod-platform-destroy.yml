@@ -52,7 +52,7 @@ jobs:
 
       - name: Terraform Init (platform)
         working-directory: infra/environments/prod/platform
-        run: terraform init
+        run: terraform init -lockfile=readonly
 
       - name: Terraform Destroy (platform)
         working-directory: infra/environments/prod/platform

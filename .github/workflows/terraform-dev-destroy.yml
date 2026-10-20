@@ -41,7 +41,7 @@ jobs:
 
       - name: Terraform Init (network)
         working-directory: infra/environments/dev/network
-        run: terraform init -input=false
+        run: terraform init -input=false -lockfile=readonly
 
       - name: Read network state outputs
         id: network_outputs
@@ -55,7 +55,7 @@ jobs:
 
       - name: Terraform Init (cluster)
         working-directory: infra/environments/dev/cluster
-        run: terraform init -input=false
+        run: terraform init -input=false -lockfile=readonly
 
       - name: Read cluster state outputs
         id: cluster_outputs

@@ -1,0 +1,69 @@
+name: "[Terraform] Update Lock Files"
+
+run-name: "[Terraform] Update Lock Files"
+
+on:
+  workflow_dispatch:
+    inputs:
+      upgrade:
+        description: "Upgrade providers to the newest versions the constraints allow"
+        type: boolean
+        default: false
+  # TEMP: lets the workflow be tested from this branch. Remove before merging to main.
+  push:
+    branches:
+      - agentic-pipeline
+    paths:
+      - '.github/workflows/terraform-lock-update.yml'
+
+permissions:
+  contents: read                   # all writes go through the GitHub App token
+
+jobs:
+  lock:
+    name: Update Terraform Lock Files
+    runs-on: ubuntu-24.04
+
+    env:
+      TF_IN_AUTOMATION: true
+      UPGRADE_FLAG: ${{ inputs.upgrade && '-upgrade' || '' }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # No backend and no AWS: only downloads providers and writes .terraform.lock.hcl.
+      # providers lock adds hashes for the CI runners and macOS, so -lockfile=readonly works on both.
+      - name: Regenerate lock files
+        run: |
+          set -euo pipefail
+          for d in infra/bootstrap infra/environments/*/*; do
+            echo "::group::$d"
+            terraform -chdir="$d" init -backend=false -input=false $UPGRADE_FLAG
+            terraform -chdir="$d" providers lock -platform=linux_amd64 -platform=darwin_arm64
+            echo "::endgroup::"
+          done
+
+      # The PR is opened as the app, not GITHUB_TOKEN, so TF Plan Review runs on it.
+      - name: Create GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.LOCK_BOT_APP_ID }}
+          private-key: ${{ secrets.LOCK_BOT_PRIVATE_KEY }}
+
+      - name: Open pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          branch: chore/terraform-lock-update
+          delete-branch: true
+          add-paths: infra/**/.terraform.lock.hcl
+          commit-message: "chore: update Terraform provider lock files"
+          title: "chore: update Terraform provider lock files"
+          body: |
+            Regenerated `.terraform.lock.hcl` for every Terraform root (upgrade: `${{ inputs.upgrade || false }}`).
+            Opened by the [Terraform] Update Lock Files workflow.

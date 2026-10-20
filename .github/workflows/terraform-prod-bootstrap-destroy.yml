@@ -70,7 +70,7 @@ jobs:
 
       - name: Terraform Init (bootstrap)
         working-directory: infra/environments/prod/bootstrap
-        run: terraform init
+        run: terraform init -lockfile=readonly
 
       - name: Terraform Destroy (bootstrap)
         working-directory: infra/environments/prod/bootstrap
