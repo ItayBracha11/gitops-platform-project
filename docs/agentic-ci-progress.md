@@ -3,10 +3,10 @@
 Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
 
 ## Now
-- **Step:** Phase 1, step 1. On PR #1 (lock files):
-  - plan job ✅: role, OIDC and `-lockfile=readonly` all work in CI.
-  - review job ❌: the `ANTHROPIC_API_KEY` secret is missing.
-- **Next:** add the secret → re-run → merge PR #1 into `agentic-pipeline` → start the Agent A skill.
+- **Step:** Phase 1, step 1. Claude access via federation (no API key):
+  - test ✅: the `agent-review` job got a Claude token.
+  - rule needs tightening before the PR review can use it (see below).
+- **Next:** tighten the rule → re-test → wire federation into the review job → PR #1 green → merge into `agentic-pipeline` → start the Agent A skill.
 
 ## Branches
 - `agentic-pipeline`: v1 reviewer + lock files work.
@@ -49,6 +49,11 @@ Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
   - Why: the plan job was failing without it.
 - **Required reviewer removed** from `tf-plan`.
   - Why: plans run automatically, as most teams do; approval belongs on apply.
+- **Claude access via Workload Identity Federation**, not an API key.
+  - Why: no stored secret to leak or rotate, same idea as the AWS OIDC role.
+  - Claude Console created an issuer (GitHub), service account `svac_017Q…`, rule `fdrl_013K…`, in workspace `wrkspc_019n…`.
+  - Only jobs in the GitHub environment `agent-review` should get a token. Each job gets one identity: `tf-plan` = AWS, `agent-review` = Claude.
+  - Temporary test workflow `anthropic-wif-test.yml` passed. **Delete it once the rule is final.**
 
 ## Decisions
 - **One skill for all roots.** Root-specific knowledge goes in `risk-checklist.md`.
