@@ -52,8 +52,11 @@ jobs:
         working-directory: infra/environments/dev/network
         run: |
           terraform init -input=false -lockfile=readonly
-          # A destroyed environment leaves the network state with no outputs.
-          if [ "$(terraform output -json | jq 'length')" -gt 0 ]; then STATE=up; else STATE=torn_down; fi
+          # A destroyed environment leaves the network state with no outputs. Read the
+          # count on its own line so an AWS or state error fails the step instead of
+          # looking like "torn down".
+          OUTPUT_COUNT=$(terraform output -json | jq 'length')
+          if [ "$OUTPUT_COUNT" -gt 0 ]; then STATE=up; else STATE=torn_down; fi
           echo "state=$STATE" >> "$GITHUB_OUTPUT"
           echo "dev is $STATE"
 
