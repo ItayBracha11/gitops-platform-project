@@ -124,7 +124,8 @@ flowchart LR
 `pull_request` on `infra/**`, `gitops/**` and `.github/workflows/terraform-*`.
 
 ### Gather job (deterministic, environment `tf-plan`)
-- Detect changed roots: `git diff --name-only origin/main...HEAD` (checkout with `fetch-depth: 0`).
+- Detect changed roots: `git diff --name-only <PR base sha>...<PR head sha>` (checkout with `fetch-depth: 0`). Diffing against the PR's own base, not `main`, keeps PRs into work branches accurate.
+  - `.github/scripts/changed-roots.sh` maps files to roots. A module change maps to every root whose `source =` line points at that module.
 - **If the environment is torn down** (network state has no outputs): skip all plans, run a diff-only review, and record the reason.
 - For each changed network or cluster root, run:
   - `init`
@@ -132,7 +133,8 @@ flowchart LR
   - `show -no-color`, written to `plan-<env>-<root>.txt` (sensitive values masked)
 
   The JSON plan never leaves this job; it shows secrets in plain text.
-- Cluster root: set `TF_VAR_public_access_cidrs` from the live cluster (`aws eks describe-cluster --query cluster.resourcesVpcConfig.publicAccessCidrs`) to avoid runner-IP drift in the plan.
+- Cluster root: set `TF_VAR_public_access_cidrs` from the live cluster (`aws eks describe-cluster --query cluster.resourcesVpcConfig.publicAccessCidrs`) to avoid runner-IP drift in the plan. If there's no cluster, there's nothing to drift from, so use the runner IP.
+- Write `gather.json`: dev state, changed roots, planned roots with their delete/replace counts, not-planned roots with reasons, and notes.
 - Platform and bootstrap roots are not planned, because they need cluster API access. Record them as not planned.
 - Stage `pr.diff` and `changed-files.txt`.
 - Hard gate, no LLM: a `jq` count of delete and replace actions, raised as a warning annotation.
@@ -324,7 +326,7 @@ Open an issue labeled `ci-failure` with the report and a link to the failed run 
 - [x] Local `readonly` SSO profile (Section 4)
 
 ### Phase 1: Agent A (branch `agent-a-blast-radius`)
-- [ ] `tf-plan-reader` role and GitHub environment `tf-plan`
+- [x] `tf-plan-reader` role and GitHub environment `tf-plan`
 - [ ] Skill, `trace-guide.md`, `risk-checklist.md`
 - [ ] Local iteration: `claude -p` against saved plans until the example trace works
 - [ ] Schema and CI settings

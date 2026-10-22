@@ -1,0 +1,125 @@
+name: TF Blast Radius
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'gitops/**'
+      - '.github/workflows/terraform-*'
+
+permissions: {}                    # nothing by default; each job asks for its own
+
+concurrency:
+  group: tf-blast-radius-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gather:                          # deterministic, privileged (AWS read-only), no LLM
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: tf-plan           # the only job the AWS plan role trusts
+    permissions:
+      contents: read
+      id-token: write              # OIDC to AWS, no static keys
+    env:
+      TF_IN_AUTOMATION: true
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}   # the PR's own base, not main
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      OUT: ${{ github.workspace }}/gather                   # everything in here becomes the artifact
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # both base and head commits, for the diff
+          persist-credentials: false
+
+      - name: Changed files and roots
+        run: |
+          mkdir -p "$OUT"
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > "$OUT/changed-files.txt"
+          git diff "$BASE_SHA...$HEAD_SHA" > "$OUT/pr.diff"
+          bash .github/scripts/changed-roots.sh < "$OUT/changed-files.txt" > "$OUT/changed-roots.txt"
+          echo "Changed roots:"; cat "$OUT/changed-roots.txt"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # plain stdout, so terraform output can be captured
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Is dev up?
+        id: dev
+        working-directory: infra/environments/dev/network
+        run: |
+          terraform init -input=false -lockfile=readonly
+          # A destroyed environment leaves the network state with no outputs.
+          if [ "$(terraform output -json | jq 'length')" -gt 0 ]; then STATE=up; else STATE=torn_down; fi
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "dev is $STATE"
+
+      - name: Plan changed dev roots, hard gate, gather.json
+        env:
+          DEV_STATE: ${{ steps.dev.outputs.state }}
+        run: |
+          set -euo pipefail
+          echo '[]' > /tmp/planned.json
+          echo '[]' > /tmp/not_planned.json
+          append() { jq --argjson o "$2" '. + [$o]' "$1" > "$1.tmp" && mv "$1.tmp" "$1"; }
+          skip() { append /tmp/not_planned.json "$(jq -n --arg r "$1" --arg why "$2" '{root: $r, reason: $why}')"; }
+
+          while read -r ROOT; do
+            [ -z "$ROOT" ] && continue
+            case "$ROOT" in
+              dev/network|dev/cluster)
+                if [ "$DEV_STATE" != up ]; then skip "$ROOT" "dev is torn down (network state has no outputs)"; continue; fi ;;
+              dev/platform|dev/bootstrap) skip "$ROOT" "needs cluster API access"; continue ;;
+              prod/*)                     skip "$ROOT" "dev only: prod roots are not planned"; continue ;;
+              backend)                    skip "$ROOT" "backend bootstrap root has no remote state"; continue ;;
+              *)                          skip "$ROOT" "not a known root"; continue ;;
+            esac
+
+            DIR="infra/environments/$ROOT"
+            PLAN_FILE="plan-${ROOT//\//-}.txt"
+            terraform -chdir="$DIR" init -input=false -lockfile=readonly
+
+            if [ "$ROOT" = dev/cluster ]; then
+              # Use the live value so the plan doesn't show a false endpoint-access change.
+              CLUSTER=$(terraform -chdir="$DIR" output -raw cluster_name 2>/dev/null || true)
+              if [ -n "$CLUSTER" ] && CIDRS=$(aws eks describe-cluster --name "$CLUSTER" \
+                   --query cluster.resourcesVpcConfig.publicAccessCidrs --output json 2>/dev/null); then
+                echo "public_access_cidrs from live cluster $CLUSTER"
+              else
+                # No cluster: nothing to drift from, so the runner IP (as the cluster workflow uses) is fine.
+                CIDRS="[\"$(curl -s https://checkip.amazonaws.com | tr -d '\n')/32\"]"
+                echo "no live cluster: public_access_cidrs = runner IP"
+              fi
+              export TF_VAR_public_access_cidrs="$CIDRS"
+            fi
+
+            terraform -chdir="$DIR" plan -input=false -lock=false -var-file=dev.tfvars -out=tfplan
+            terraform -chdir="$DIR" show -no-color tfplan > "$OUT/$PLAN_FILE"   # sensitive values masked
+            terraform -chdir="$DIR" show -json tfplan > /tmp/plan.json          # plain-text secrets: never leaves this job
+            N=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' /tmp/plan.json)
+            rm -f /tmp/plan.json
+            if [ "$N" -gt 0 ]; then echo "::warning::$ROOT plan deletes or replaces $N resource(s)"; fi
+            append /tmp/planned.json "$(jq -n --arg r "$ROOT" --arg f "$PLAN_FILE" --argjson n "$N" \
+              '{root: $r, plan_file: $f, deletes_or_replaces: $n}')"
+          done < "$OUT/changed-roots.txt"
+
+          NOTES='[]'
+          if [ "$(jq '[.[].root] | (index("dev/network") != null) and (index("dev/cluster") != null)' /tmp/planned.json)" = true ]; then
+            NOTES='["The cluster plan reads the current network state, so network changes in this PR are not reflected in it."]'
+          fi
+          jq -n --arg base "$BASE_SHA" --arg head "$HEAD_SHA" --arg dev "$DEV_STATE" \
+            --rawfile roots "$OUT/changed-roots.txt" \
+            --slurpfile planned /tmp/planned.json --slurpfile not_planned /tmp/not_planned.json \
+            --argjson notes "$NOTES" \
+            '{base_sha: $base, head_sha: $head, dev_state: $dev,
+              changed_roots: ($roots | split("\n") | map(select(length > 0))),
+              planned: $planned[0], not_planned: $not_planned[0], notes: $notes}' > "$OUT/gather.json"
+          cat "$OUT/gather.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gather
+          path: gather/
