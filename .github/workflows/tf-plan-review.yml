@@ -82,7 +82,7 @@ jobs:
             --max-turns 10 \
             --output-format json \
             --json-schema "$(cat .github/claude/review-schema.json)" \
-            > result.json
+            > result.json || { echo "::error::claude exited non-zero"; cat result.json; exit 1; }
           echo "cost_usd=$(jq '.total_cost_usd' result.json)"
       - uses: actions/upload-artifact@v4
         with:
