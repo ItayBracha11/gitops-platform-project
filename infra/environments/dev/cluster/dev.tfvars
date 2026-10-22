@@ -10,4 +10,5 @@ instance_types = ["t3.small"]
 tags = {
   Project     = "gitops-platform"
   Environment = "dev"
+  GatherTest  = "true"
 }
