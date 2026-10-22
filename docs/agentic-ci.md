@@ -318,8 +318,8 @@ Open an issue labeled `ci-failure` with the report and a link to the failed run 
 
 ### Phase 0: shared foundation (branch `agentic-foundation`)
 - [x] CLAUDE.md (repo map and agent rules, Appendix A)
-- [ ] Confirm the GitHub OIDC provider exists in the account
-- [ ] Local `readonly` SSO profile (Section 4)
+- [x] Confirm the GitHub OIDC provider exists in the account
+- [x] Local `readonly` SSO profile (Section 4)
 
 ### Phase 1: Agent A (branch `agent-a-blast-radius`)
 - [ ] `tf-plan-reader` role and GitHub environment `tf-plan`
