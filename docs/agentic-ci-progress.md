@@ -82,6 +82,10 @@ Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
   - Cluster: `public_access_cidrs` comes from the live cluster, or the runner IP when there's no cluster.
 - **Hard gate:** counts deletes/replaces with `jq`. The JSON plan (plain-text secrets) never leaves the job.
 - **Output:** artifact `gather` = plan text files, `pr.diff`, `changed-files.txt`, `gather.json`.
+- **Plan files with full values are deleted right after use** (`/tmp/plan.json` and the binary `tfplan`).
+  - Why: the JSON/binary plan shows sensitive values in plain text. Only the masked text plan is kept and shared.
+- **`tf-plan-reader` can't read prod state** (inline policy `tf-no-prod-state`, explicit deny on `prod/*`).
+  - Why: the repo is public, and anyone with write access could edit the workflow in a PR and use this role. With the deny, prod state files (which can hold secrets) stay out of reach. Dev is all the gather job needs.
 - **Tested:** PR #2 (test, not merged) changed a dev cluster tag and a prod network tag. Result: `torn_down`, nothing planned, the correct reason per root. v1 didn't run.
   - Not tested yet: the path with real plans. That needs dev up, so it's covered in the eval batch (step 6).
 
@@ -95,7 +99,7 @@ Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
 
 ## Later
 - Add an approval gate on the **prod apply** workflow.
-- Tighten `tf-plan-reader` beyond `ReadOnlyAccess`.
+- Tighten `tf-plan-reader` further (prod state is already blocked; next would be scoping it to only what a dev plan reads).
 - Decide on `[skip ci]` for the final merge to `main`, which otherwise triggers the dev and prod applies.
 - Move off the subscription token once there's API credit.
 - Agent runs longer than ~9 min need a refreshed GitHub token for federation (matters for Agent A's 25 turns).

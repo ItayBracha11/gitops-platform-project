@@ -103,7 +103,7 @@ jobs:
             terraform -chdir="$DIR" show -no-color tfplan > "$OUT/$PLAN_FILE"   # sensitive values masked
             terraform -chdir="$DIR" show -json tfplan > /tmp/plan.json          # plain-text secrets: never leaves this job
             N=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' /tmp/plan.json)
-            rm -f /tmp/plan.json
+            rm -f /tmp/plan.json "$DIR/tfplan"   # both hold full values; only the masked text is kept
             if [ "$N" -gt 0 ]; then echo "::warning::$ROOT plan deletes or replaces $N resource(s)"; fi
             append /tmp/planned.json "$(jq -n --arg r "$ROOT" --arg f "$PLAN_FILE" --argjson n "$N" \
               '{root: $r, plan_file: $f, deletes_or_replaces: $n}')"

@@ -96,7 +96,7 @@ GitHub environments for these jobs have **no required reviewers**, so runs proce
 
 | Role | Used by | Permissions | Trusted for |
 |---|---|---|---|
-| `tf-plan-reader` | Agent A gather job (no LLM) | ReadOnlyAccess (plan needs state and resource reads) | `environment:tf-plan` |
+| `tf-plan-reader` | Agent A gather job (no LLM) | ReadOnlyAccess (plan needs state and resource reads), plus inline `tf-no-prod-state`: explicit deny of `s3:GetObject` on `prod/*` state, since only dev is planned | `environment:tf-plan` |
 | `ci-failure-investigator` | Agent B agent job | Describe, List and Get on EC2, ELBv2, EKS and IAM; `cloudtrail:LookupEvents`. **No S3**: state holds secrets in plain text | `environment:failure-investigator` |
 
 Agent A's LLM step has no AWS access at all.
