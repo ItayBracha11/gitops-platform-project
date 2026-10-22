@@ -46,8 +46,15 @@ jobs:
     needs: plan
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    environment: agent-review      # the only job the Claude federation rule trusts
     permissions:
       contents: read               # no AWS, no write token
+      id-token: write              # GitHub OIDC token, exchanged for a short-lived Claude token
+    env:                           # federation IDs, not secrets; no API key anywhere
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -56,9 +63,18 @@ jobs:
         with:
           name: plan
       - run: npm install -g @anthropic-ai/claude-code
+      # Claude Code exchanges this once at startup. The Claude token lives at most ~10 min
+      # (twice the GitHub token's remaining life), which covers timeout-minutes above.
+      - name: Fetch GitHub OIDC token for Claude
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const path = `${process.env.RUNNER_TEMP}/gha-jwt`;
+            const token = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(token);
+            require('fs').writeFileSync(path, token, { mode: 0o600 });
+            core.exportVariable('ANTHROPIC_IDENTITY_TOKEN_FILE', path);
       - name: Agent reviews the plan
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           claude -p "/tf-plan-review plan-network.txt" \
             --settings .github/claude/ci-settings.json \
