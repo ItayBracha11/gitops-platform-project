@@ -1,0 +1,40 @@
+name: anthropic-wif-test
+
+# TEMP: one-off check of the Claude federation rule. Delete after it passes.
+on:
+  push:
+    branches:
+      - agentic-foundation
+    paths:
+      - '.github/workflows/anthropic-wif-test.yml'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  call-claude:
+    runs-on: ubuntu-24.04
+    environment: agent-review        # the federation rule trusts only this environment
+    steps:
+      - name: Fetch GitHub OIDC token
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const token = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(token);
+            core.exportVariable('JWT', token);
+      - name: Exchange for an Anthropic access token
+        run: |
+          curl -sS https://api.anthropic.com/v1/oauth/token \
+            -H "content-type: application/json" \
+            --data @- <<JSON | jq 'with_entries(if (.key | test("token$")) then .value = "<redacted>" else . end)'
+          {
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": "$JWT",
+            "federation_rule_id": "fdrl_013KGr9Fc6WtizfNpJbEigUC",
+            "organization_id": "41712dea-f849-41e8-a7e3-431e8910fe07",
+            "service_account_id": "svac_017QwBBP5EPkHzQZzM4XUHL4",
+            "workspace_id": "wrkspc_019nEoiLfj4pfZzV8andhHwi"
+          }
+          JSON
