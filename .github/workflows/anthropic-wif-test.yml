@@ -38,3 +38,35 @@ jobs:
             "workspace_id": "wrkspc_019nEoiLfj4pfZzV8andhHwi"
           }
           JSON
+
+  no-environment:                    # negative test: same repo, no agent-review, must be rejected
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Fetch GitHub OIDC token
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const token = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(token);
+            core.exportVariable('JWT', token);
+      - name: Exchange must be rejected
+        run: |
+          RESP=$(curl -sS https://api.anthropic.com/v1/oauth/token \
+            -H "content-type: application/json" \
+            --data @- <<JSON
+          {
+            "grant_type": "urn:ietf:params:oauth:grant-type:jwt-bearer",
+            "assertion": "$JWT",
+            "federation_rule_id": "fdrl_013KGr9Fc6WtizfNpJbEigUC",
+            "organization_id": "41712dea-f849-41e8-a7e3-431e8910fe07",
+            "service_account_id": "svac_017QwBBP5EPkHzQZzM4XUHL4",
+            "workspace_id": "wrkspc_019nEoiLfj4pfZzV8andhHwi"
+          }
+          JSON
+          )
+          echo "$RESP" | jq 'with_entries(if (.key | test("token$")) then .value = "<redacted>" else . end)'
+          if echo "$RESP" | jq -e '.access_token' > /dev/null; then
+            echo "::error::A job outside agent-review got a Claude token. The rule is too broad."
+            exit 1
+          fi
+          echo "Rejected as expected."
