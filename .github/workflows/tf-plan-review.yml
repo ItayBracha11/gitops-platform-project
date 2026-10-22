@@ -75,6 +75,10 @@ jobs:
             require('fs').writeFileSync(path, token, { mode: 0o600 });
             core.exportVariable('ANTHROPIC_IDENTITY_TOKEN_FILE', path);
       - name: Agent reviews the plan
+        env:
+          # Known gap: subscription token (no API credit). It outranks the federation vars,
+          # so deleting this secret switches the job back to federation.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
         run: |
           claude -p "/tf-plan-review plan-network.txt" \
             --settings .github/claude/ci-settings.json \
@@ -84,6 +88,12 @@ jobs:
             --json-schema "$(cat .github/claude/review-schema.json)" \
             > result.json || { echo "::error::claude exited non-zero"; cat result.json; exit 1; }
           echo "cost_usd=$(jq '.total_cost_usd' result.json)"
+      - name: Block leaked Anthropic credentials   # before the artifact or a PR comment can carry one
+        run: |
+          if grep -q 'sk-ant-' result.json; then
+            echo "::error::Agent output contains an Anthropic credential prefix. Not uploading or posting."
+            exit 1
+          fi
       - uses: actions/upload-artifact@v4
         with:
           name: review
