@@ -65,7 +65,7 @@ The first version of the reviewer classified a single plan file as low, medium o
 
 1. **Trust boundary = job boundary.** Three jobs: deterministic *gather* → *agent* → deterministic *publish*. Data crosses only as artifacts.
 2. **Agents never change anything.** No apply or destroy, no AWS writes, no git push, no comments. Publish is the only job with a write permission.
-3. **Least privilege per job.** The agent job gets `contents: read` and `persist-credentials: false` (no git token left on disk). Its only secrets are the model key and, for Agent B, a scoped read-only AWS role.
+3. **Least privilege per job.** The agent job gets `contents: read` and `persist-credentials: false` (no git token left on disk), plus `id-token: write` to reach Claude through federation (Section 4), so it holds no model API key. For Agent B, it also gets a scoped read-only AWS role.
 4. **Evidence or it didn't happen.** Every claim carries `path:line`, a log line or an AWS resource ID. Publish validates what it can and marks the rest "unverified".
 5. **Structured output only.** `--json-schema` defines the answer; publish renders fields, never free text.
 6. **Bounded.** `--max-turns`, `timeout-minutes`, and `total_cost_usd` logged on every run.
@@ -100,6 +100,8 @@ GitHub environments for these jobs have **no required reviewers**, so runs proce
 | `ci-failure-investigator` | Agent B agent job | Describe, List and Get on EC2, ELBv2, EKS and IAM; `cloudtrail:LookupEvents`. **No S3**: state holds secrets in plain text | `environment:failure-investigator` |
 
 Agent A's LLM step has no AWS access at all.
+
+**Claude access works the same way.** A Workload Identity Federation rule in the Claude Console trusts GitHub's OIDC token only for `environment:agent-review`. The agent job exchanges that token for a short-lived Claude token, so no API key is stored. One environment means one identity: `tf-plan` gets AWS, and `agent-review` gets Claude. Verified: a job outside `agent-review` is refused.
 
 ### Locally: Claude Code in VS Code
 The local session uses your terminal's credentials. Create an IAM Identity Center permission set with the same policy as `ci-failure-investigator`, use it as profile `readonly`, and start VS Code with `AWS_PROFILE=readonly`. Run `aws sso login --profile readonly` when the session expires; that's only for the dev loop. Never give the local session an admin profile.
@@ -360,6 +362,9 @@ Instructions for the coding agent:
 - Migrating the existing workflows off static keys (tracked separately).
 
 **Known gaps:**
+- **Subscription token instead of federation.** There's no API credit, so the agent job uses a Claude subscription token (`CLAUDE_CODE_OAUTH_TOKEN`, a `agent-review` environment secret). It lasts a year, which breaks "no stored keys".
+  - Guards: the agent is denied `Read(//proc/**)`, and the job fails before uploading or posting any output that contains `sk-ant-`.
+  - Fix: add API credit and delete the secret. The token outranks the federation variables, so once it's gone the job uses federation automatically.
 - GitHub-hosted runners don't restrict egress (Agent B, decision 2).
 - The eval sets are small (5–7 cases). They give a direction, not statistics.
 

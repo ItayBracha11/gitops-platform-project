@@ -3,14 +3,12 @@
 Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
 
 ## Now
-- **Step:** Phase 1, step 1. Claude access via federation (no API key):
-  - test ✅: the `agent-review` job got a Claude token.
-  - rule needs tightening before the PR review can use it (see below).
-- **Next:** tighten the rule → re-test → wire federation into the review job → PR #1 green → merge into `agentic-pipeline` → start the Agent A skill.
+- **Step:** Phase 1, step 1 done. The v1 pipeline works end to end: plan → review → PR comment.
+- **Next:** create branch `agent-a-blast-radius` → build the gather job (plans every changed root) → write the Agent A skill.
 
 ## Branches
-- `agentic-pipeline`: v1 reviewer + lock files work.
-- `agentic-foundation`: Phase 0 (cut from `agentic-pipeline`).
+- `agentic-pipeline`: v1 reviewer, lock files, Claude access.
+- `agentic-foundation`: Phase 0 + docs (includes everything from `agentic-pipeline`).
 - `agent-a-blast-radius`: Phase 1, not created yet.
 - Nothing merges to `main` until Agent A passes its acceptance criteria.
 
@@ -21,14 +19,16 @@ Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
   - Why: the reviewed plan and the applied plan use the same provider versions.
 - **`-lockfile=readonly` on every `terraform init`** in CI.
   - Why: CI never silently changes provider versions.
-- **New workflow `[Terraform] Update Lock Files`.**
+- **New workflow `[Terraform] Update Lock Files`** (run it by hand from the Actions tab).
   - Regenerates the lock files and opens a PR.
   - Why: provider upgrades become reviewable PRs, not surprises at apply time.
 - **GitHub App `itay-tf-lock-bot` opens those PRs.**
   - Why: PRs opened with `GITHUB_TOKEN` don't trigger other workflows, so the plan review would never run.
-- **Temporary `push` trigger on the lock workflow.**
-  - Why: lets us test it before it's on `main`.
-  - **Remove before merging to `main`.**
+- **Proven on PR #1** (9 lock files):
+  - opened by the app, plan passed with `-lockfile=readonly`, review posted;
+  - merged into `agentic-pipeline`;
+  - every root also passes the readonly init on the Mac.
+  - The temporary test trigger is removed.
 
 ### Phase 0: foundation (`agentic-foundation`)
 - **Design doc** `docs/agentic-ci.md` added; CLAUDE.md points agents to it.
@@ -49,11 +49,15 @@ Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
   - Why: the plan job was failing without it.
 - **Required reviewer removed** from `tf-plan`.
   - Why: plans run automatically, as most teams do; approval belongs on apply.
-- **Claude access via Workload Identity Federation**, not an API key.
-  - Why: no stored secret to leak or rotate, same idea as the AWS OIDC role.
-  - Claude Console created an issuer (GitHub), service account `svac_017Q…`, rule `fdrl_013K…`, in workspace `wrkspc_019n…`.
-  - Only jobs in the GitHub environment `agent-review` should get a token. Each job gets one identity: `tf-plan` = AWS, `agent-review` = Claude.
-  - Temporary test workflow `anthropic-wif-test.yml` passed. **Delete it once the rule is final.**
+- **Claude access via Workload Identity Federation** (Claude Console: issuer, service account, rule).
+  - Why: no stored API key, same idea as the AWS role.
+  - The rule trusts only the GitHub environment `agent-review`. Tested both ways: inside it gets a token, outside it is refused.
+  - IDs are variables on `agent-review`. One environment = one identity: `tf-plan` = AWS, `agent-review` = Claude.
+- **Subscription token for now** (`CLAUDE_CODE_OAUTH_TOKEN`, secret on `agent-review`).
+  - Why: federation works, but the account has no API credit.
+  - Known gap: a long-lived secret. Guards: the agent can't read `/proc`, and the job fails if output contains `sk-ant-`.
+  - Switch back: add API credit → delete the secret.
+- **Failure output:** when `claude` fails, the step prints its output. That's how the credit problem was found.
 
 ## Decisions
 - **One skill for all roots.** Root-specific knowledge goes in `risk-checklist.md`.
@@ -67,3 +71,5 @@ Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
 - Add an approval gate on the **prod apply** workflow.
 - Tighten `tf-plan-reader` beyond `ReadOnlyAccess`.
 - Decide on `[skip ci]` for the final merge to `main`, which otherwise triggers the dev and prod applies.
+- Move off the subscription token once there's API credit.
+- Agent runs longer than ~9 min need a refreshed GitHub token for federation (matters for Agent A's 25 turns).
