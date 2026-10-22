@@ -3,13 +3,22 @@
 Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
 
 ## Now
-- **Step:** Phase 1, step 1 done. The v1 pipeline works end to end: plan → review → PR comment.
-- **Next:** create branch `agent-a-blast-radius` → build the gather job (plans every changed root) → write the Agent A skill.
+- **Step:** Agent A, step 1 (gather job) built and tested on the torn-down path.
+- **Next:** step 2, the skill (`SKILL.md`, `trace-guide.md`, `risk-checklist.md`).
+
+## Agent A steps
+1. ✅ Gather job (no LLM): find the changed roots, plan the dev network/cluster roots, package the evidence.
+2. Skill: how to trace, where coupling lives, risk rules.
+3. Local iteration: `claude -p` on real gather outputs.
+4. Schema: adds impacts, evidence, untraced, not-planned.
+5. Workflow: gather → agent → publish (evidence check). v1 removed.
+6. Evals: 7 PRs × 3 runs, in one batch with dev up.
+7. Acceptance; merge to `main` is the user's call.
 
 ## Branches
 - `agentic-pipeline`: v1 reviewer, lock files, Claude access.
 - `agentic-foundation`: Phase 0 + docs (includes everything from `agentic-pipeline`).
-- `agent-a-blast-radius`: Phase 1, not created yet.
+- `agent-a-blast-radius`: Agent A work (cut from `agentic-foundation`).
 - Nothing merges to `main` until Agent A passes its acceptance criteria.
 
 ## Done
@@ -58,6 +67,23 @@ Where we are and why. Spec: [agentic-ci.md](agentic-ci.md).
   - Known gap: a long-lived secret. Guards: the agent can't read `/proc`, and the job fails if output contains `sk-ant-`.
   - Switch back: add API credit → delete the secret.
 - **Failure output:** when `claude` fails, the step prints its output. That's how the credit problem was found.
+
+### Agent A, step 1: gather job (`agent-a-blast-radius`)
+- **What:** the first job of `tf-blast-radius.yml`. No LLM, and the only job with AWS access (`tf-plan`).
+  - Why: the agent should get evidence, not credentials.
+- **Diffs against the PR's own base**, not `main`.
+  - Why: our PRs target work branches. Diffing against `main` would pull in unrelated changes.
+- **`changed-roots.sh` maps files → roots.** A module change maps to every root whose `source =` points at it.
+  - Why: read from the code, so it can't go stale. Tested locally with 7 cases.
+- **Checks whether dev is up** (network state has outputs?). If it's down, nothing is planned and the reason is recorded.
+  - A state read error now fails the job instead of looking like "torn down" (found in review, fixed).
+- **Plans only dev network/cluster.**
+  - Platform/bootstrap need cluster API access; prod is out of scope (dev only).
+  - Cluster: `public_access_cidrs` comes from the live cluster, or the runner IP when there's no cluster.
+- **Hard gate:** counts deletes/replaces with `jq`. The JSON plan (plain-text secrets) never leaves the job.
+- **Output:** artifact `gather` = plan text files, `pr.diff`, `changed-files.txt`, `gather.json`.
+- **Tested:** PR #2 (test, not merged) changed a dev cluster tag and a prod network tag. Result: `torn_down`, nothing planned, the correct reason per root. v1 didn't run.
+  - Not tested yet: the path with real plans. That needs dev up, so it's covered in the eval batch (step 6).
 
 ## Decisions
 - **One skill for all roots.** Root-specific knowledge goes in `risk-checklist.md`.
