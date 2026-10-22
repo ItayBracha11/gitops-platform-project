@@ -9,12 +9,6 @@ on:
         description: "Upgrade providers to the newest versions the constraints allow"
         type: boolean
         default: false
-  # TEMP: lets the workflow be tested from this branch. Remove before merging to main.
-  push:
-    branches:
-      - agentic-pipeline
-    paths:
-      - '.github/workflows/terraform-lock-update.yml'
 
 permissions:
   contents: read                   # all writes go through the GitHub App token

@@ -1,5 +1,5 @@
 {
   "permissions": {
-    "deny": ["Bash", "Edit", "Write", "WebFetch", "WebSearch"]
+    "deny": ["Bash", "Edit", "Write", "WebFetch", "WebSearch", "Read(//proc/**)"]
   }
 }
