@@ -3,7 +3,8 @@
 What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-ci.md).
 
 ## ⏭ Next to be done: Agent A, step 3, local iteration
-- **What:** run the agent on my machine (`claude -p "/tf-blast-radius <folder>"`) against real gather outputs and fix the skill until it traces correctly.
+- **What:** run the agent on my machine (`claude -p "/tf-blast-radius <folder>"`) against gather outputs and fix the skill until it traces correctly.
+- **How:** in a clean copy of the branch with `docs/` removed, so the eval answers aren't in reach.
 - **Why:** the first real test of the skill, before it costs CI runs.
 - **Inputs:**
   - Now: PR #2's artifact (diff-only, dev down).
@@ -59,6 +60,12 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - **No eval answers in the skill:** searched for the evals' expected impacts (values file, ALB, workflow names, …); none found.
   - Why: otherwise the agent passes evals by copying and they prove nothing.
 - **Input folder passed as an argument** (`/tf-blast-radius gather/`), so the same command works in CI and locally.
+- **Reviewed and fixed:**
+  - It now acts on `gather.json` notes.
+  - Every counted delete must become a finding.
+  - Diff-only actions are marked "expected".
+  - Two examples that pointed at real answers were made neutral.
+- **Found: the design doc holds the eval answers.** The agent can search the whole repo, so the agent job (step 5) and local runs (step 3) must not contain `docs/`.
 
 ### 3. Local iteration ⏭ Next to be done
 See the top of this file.
@@ -68,6 +75,7 @@ See the top of this file.
 
 ### 5. Full workflow ⬜ To do
 - gather → agent → publish, with publish checking every cited file exists. v1 is removed.
+- The agent job deletes `docs/` before running (the eval answers live there).
 
 ### 6. Evals ⬜ To do
 - 7 test PRs, 3 runs each, in one batch with dev up, then dev destroyed.
