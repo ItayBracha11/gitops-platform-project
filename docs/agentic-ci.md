@@ -141,7 +141,7 @@ flowchart LR
 
 ### Agent job
 ```bash
-claude -p "/tf-blast-radius" \
+claude -p "/tf-blast-radius gather/" \
   --settings .github/claude/ci-settings.json \
   --permission-mode dontAsk \
   --max-turns 25 \
@@ -152,9 +152,11 @@ claude -p "/tf-blast-radius" \
 - **Skill procedure:**
   1. List risky changes from the plans and the diff.
   2. For each one, name the identifier that changes: ID, name, ARN, CIDR or output.
-  3. Find every consumer (patterns in `trace-guide.md`).
-  4. If a consumer produces something, follow it one more hop.
-  5. Stop when all risky changes are traced or the budget runs out. List what wasn't traced.
+  3. Follow the value itself as far as it goes (patterns in `trace-guide.md`). Where it's passed on unchanged, such as a re-exported output, a generated file that writes it, or a duplicated tfvar, it's the same value. Keep following it; that doesn't count as a hop.
+  4. Where the value is used to build something else (for example, subnet IDs → a cluster), follow that new thing one hop.
+  5. Stop when all risky changes are traced or the budget runs out. List what wasn't traced, never drop it silently.
+- **Input:** the gather artifact folder is passed as the argument, so the same command works in CI and locally on a downloaded artifact.
+- **Why not a fixed hop count:** a pass-through output would lengthen the chain without anything really changing, and going too deep makes "everything is impacted". The evals decide whether this depth is enough.
 - **`trace-guide.md`:** coupling patterns, written generically with no answers baked in:
   - `terraform_remote_state` readers
   - Module inputs and outputs
