@@ -23,6 +23,7 @@ jobs:
     env:
       TF_IN_AUTOMATION: true
       BASE_SHA: ${{ github.event.pull_request.base.sha }}   # the PR's own base, not main
+      BASE_REF: ${{ github.event.pull_request.base.ref }}   # target branch: decides what a merge triggers
       HEAD_SHA: ${{ github.event.pull_request.head.sha }}
       OUT: ${{ github.workspace }}/gather                   # everything in here becomes the artifact
     steps:
@@ -113,11 +114,11 @@ jobs:
           if [ "$(jq '[.[].root] | (index("dev/network") != null) and (index("dev/cluster") != null)' /tmp/planned.json)" = true ]; then
             NOTES='["The cluster plan reads the current network state, so network changes in this PR are not reflected in it."]'
           fi
-          jq -n --arg base "$BASE_SHA" --arg head "$HEAD_SHA" --arg dev "$DEV_STATE" \
+          jq -n --arg base "$BASE_SHA" --arg base_ref "$BASE_REF" --arg head "$HEAD_SHA" --arg dev "$DEV_STATE" \
             --rawfile roots "$OUT/changed-roots.txt" \
             --slurpfile planned /tmp/planned.json --slurpfile not_planned /tmp/not_planned.json \
             --argjson notes "$NOTES" \
-            '{base_sha: $base, head_sha: $head, dev_state: $dev,
+            '{base_ref: $base_ref, base_sha: $base, head_sha: $head, dev_state: $dev,
               changed_roots: ($roots | split("\n") | map(select(length > 0))),
               planned: $planned[0], not_planned: $not_planned[0], notes: $notes}' > "$OUT/gather.json"
           cat "$OUT/gather.json"

@@ -66,5 +66,8 @@ The same variable can be set separately in several roots' tfvars.
 
 - Grep the variable name across `infra/environments/*/*/*.tfvars` (and `variables.tf` for
   defaults).
-- If two roots set the same setting and the PR changes only one, they now disagree. That's an
-  impact on the root that wasn't changed.
+- What matters is a setting that **must agree** across roots: a name or ID that one root uses to
+  find or refer to what another root created. If the PR changes it in only one root, the other
+  now points at something that doesn't match. That's an impact.
+- Settings that are independent per root (like each root's own tags map) don't need to agree.
+  Differences between them are not impacts.

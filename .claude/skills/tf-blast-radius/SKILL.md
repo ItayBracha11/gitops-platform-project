@@ -12,7 +12,7 @@ roots, generated files, GitOps apps, workflows) and prove each one with evidence
 
 Everything is in the folder `$ARGUMENTS`:
 
-- `gather.json`: `dev_state`, `changed_roots`, `planned` (with delete/replace counts),
+- `gather.json`: `base_ref` (the branch the PR merges into), `dev_state`, `changed_roots`, `planned` (with delete/replace counts),
   `not_planned` (with reasons), and `notes`. Each note is a known limit of the evidence (for
   example, a plan that couldn't see another change in the same PR). Account for it in the
   findings or in `untraced`.
@@ -53,8 +53,16 @@ that text were absent.
 5. **Stop** when every risky change is traced or your budget is running out. Put anything you
    didn't finish in `untraced`, with the reason. Never drop it silently.
 
-Search before you read: Grep for the identifier, then Read only the lines you need. Don't
-re-trace a change with no consumers (a tag, an output nobody reads); say it has none.
+**Match the effort to the risk.** Search before you read: Grep for the identifier, then Read
+only the lines you need. A low-risk change needs one search to confirm nothing reads it, then
+stop. Don't re-trace a change with no consumers (a tag, an output nobody reads); say it has none.
+
+**What a merge triggers depends on `base_ref`.** Workflows that run on push only fire for
+their own branches. Report a merge-triggered run only if its trigger matches `base_ref`.
+
+**What counts as an impact:** something outside the changed resource that breaks, behaves
+differently, or must be changed along with it. A cosmetic difference (two roots with different
+tags) is not an impact. Leave it out, or mention it in the summary if a reviewer should know.
 
 ## Evidence
 
