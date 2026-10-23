@@ -178,7 +178,11 @@ claude -p "/tf-blast-radius gather/" \
 A tag-only PR stops after step 1. That variation is the loop.
 
 ### Output schema
-`verdict`, `summary`, `findings[{resource, action, risk, why, impacts[{affected, how, evidence}]}]`, `untraced[]`, `not_planned_roots[{root, reason}]`
+`verdict`, `summary`, `findings[{resource, action, risk, why, impacts[{affected, how, evidence[]}]}]`, `untraced[{item, reason}]`, `not_planned_roots[{root, reason}]`
+
+- File: `.github/claude/blast-radius-schema.json`. Every object sets `additionalProperties: false`.
+- `evidence` is a list with one `path:line` (or `path:start-end`) per entry, so publish can check each one. In early local runs the agent joined several paths into one string.
+- The `path:line` format and the existence of each file are checked by publish, not by the schema.
 
 ### Publish job
 Verify the agent's evidence before posting:
@@ -330,9 +334,9 @@ Open an issue labeled `ci-failure` with the report and a link to the failed run 
 
 ### Phase 1: Agent A (branch `agent-a-blast-radius`)
 - [x] `tf-plan-reader` role and GitHub environment `tf-plan`
-- [ ] Skill, `trace-guide.md`, `risk-checklist.md`
-- [ ] Local iteration: `claude -p` against saved plans until the example trace works
-- [ ] Schema and CI settings
+- [x] Skill, `trace-guide.md`, `risk-checklist.md`
+- [x] Local iteration: `claude -p` against gather outputs (PR #2's real artifact and a synthetic AZ change). The example trace with a real plan runs as the smoke test at the dev-up stop.
+- [x] Schema and CI settings
 - [ ] Workflow
 - [ ] Eval PRs pass the acceptance criteria
 

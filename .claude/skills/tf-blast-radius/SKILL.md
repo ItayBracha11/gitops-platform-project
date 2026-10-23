@@ -83,11 +83,13 @@ Cite only lines you have read. If you can't point to a line, the impact doesn't 
 
 ## Output
 
-Fill the provided JSON schema:
+Return only the fields of the provided JSON schema, nothing extra:
 
 - `verdict`.
 - `summary`: two or three sentences a reviewer can act on. Say if the review was diff-only.
 - `findings[]`: `resource`, `action`, `risk`, `why`, and `impacts[]` (`affected`, `how`,
   `evidence`). A finding with no consumers has an empty `impacts`.
-- `untraced[]`: what you didn't trace, and why.
+  - `evidence` is a list. Each entry is one `path:line` or `path:start-end`, never several joined
+    together.
+- `untraced[]`: objects with `item` (what you didn't trace) and `reason` (why).
 - `not_planned_roots[]`: copy `root` and `reason` from `gather.json`'s `not_planned`.

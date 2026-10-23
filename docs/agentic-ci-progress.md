@@ -2,13 +2,22 @@
 
 What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-ci.md).
 
-## ⏭ Next to be done: Agent A, step 4, the output schema
-- **What:** `.github/claude/blast-radius-schema.json`, the exact JSON shape the agent must return. Claude Code enforces it with `--json-schema`.
-- **Why:** publish renders fields, never free text. The local runs also showed what's needed:
-  - `evidence` as a list of `path:line`, not one string joined with commas, so publish can check each one.
-  - `untraced` as `{item, reason}` objects.
-  - No extra fields.
-- **Done when:** the schema exists, matches the design doc's fields, and a local run with `--json-schema` returns valid output.
+## ⏭ Next to be done: Agent A, step 5, the full workflow
+- **What:** finish `tf-blast-radius.yml`: gather (done) → **agent** → **publish**, and remove v1.
+  - **Agent job:**
+    - runs in `agent-review`;
+    - deletes `docs/` before running;
+    - runs `claude -p "/tf-blast-radius gather/"` with the schema;
+    - uploads the transcript;
+    - has the leak guard.
+  - **Publish job:**
+    - checks every `evidence` entry (format + file exists), marking failures "unverified";
+    - renders the fields;
+    - posts one PR comment.
+  - **v1:** remove `tf-plan-review.yml`, its skill and its schema.
+- **Why:** this turns the pieces into the reviewer that runs on every PR.
+- **Done when:** the workflow runs on a test PR (diff-only, while dev is down) and posts a comment.
+- 🛑 **Then the dev-up stop point** (see step 6).
 
 ---
 
@@ -81,10 +90,18 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - **Why it counts:** the skill now traces correctly and grades correctly on real and deep inputs.
 - **Still to see:** the doc's VPC CIDR example with a real plan. That's the smoke test at the dev-up stop.
 
-### 4. Output schema ⏭ Next to be done
+### 4. Output schema ✅ Done
+- **What:** `.github/claude/blast-radius-schema.json`. The agent must return exactly these fields; Claude Code enforces it.
+- **Changes from the doc:**
+  - `evidence` is a list of `path:line`.
+  - `untraced` items are `{item, reason}`.
+  - No extra fields allowed.
+  - Why: the local runs joined paths with commas and added an unrequested field.
+- **Proof:** two local runs with the schema (the PR #2 tags and the AZ change) both returned valid output. All 14 evidence entries were well-formed and pointed at files that exist (the same check publish will make).
+
+### 5. Full workflow ⏭ Next to be done
 See the top of this file.
 
-### 5. Full workflow ⬜ To do
 - gather → agent → publish, with publish checking every cited file exists. v1 is removed.
 - The agent job deletes `docs/` before running (the eval answers live there).
 

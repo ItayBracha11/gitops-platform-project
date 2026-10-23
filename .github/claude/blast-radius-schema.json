@@ -1,0 +1,64 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "summary", "findings", "untraced", "not_planned_roots"],
+  "properties": {
+    "verdict": { "type": "string", "enum": ["low", "medium", "high"] },
+    "summary": { "type": "string" },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["resource", "action", "risk", "why", "impacts"],
+        "properties": {
+          "resource": { "type": "string" },
+          "action": { "type": "string" },
+          "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+          "why": { "type": "string" },
+          "impacts": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["affected", "how", "evidence"],
+              "properties": {
+                "affected": { "type": "string" },
+                "how": { "type": "string" },
+                "evidence": {
+                  "type": "array",
+                  "description": "One path:line (or path:start-end) per entry, each a line you read",
+                  "items": { "type": "string" }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "untraced": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["item", "reason"],
+        "properties": {
+          "item": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    },
+    "not_planned_roots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["root", "reason"],
+        "properties": {
+          "root": { "type": "string" },
+          "reason": { "type": "string" }
+        }
+      }
+    }
+  }
+}
