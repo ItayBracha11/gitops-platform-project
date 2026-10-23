@@ -78,7 +78,12 @@ See the top of this file.
 - The agent job deletes `docs/` before running (the eval answers live there).
 
 ### 6. Evals ⬜ To do
-- 7 test PRs, 3 runs each, in one batch with dev up, then dev destroyed.
+- 🛑 **Dev-up stop point (agreed): right after step 5.** One session:
+  1. Bring dev up.
+  2. One smoke-test PR proves the gather planned path, the agent in CI, and publish.
+  3. The eval batch: 7 test PRs, 3 runs each.
+  4. Destroy dev.
+- Why one stop: everything that needs dev is tested in a single apply/destroy (about $0.30/hour of AWS).
 
 ### 7. Acceptance ⬜ To do
 - Every eval gets the expected verdict. Then merging to `main` is your call.
