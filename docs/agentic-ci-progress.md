@@ -2,14 +2,13 @@
 
 What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-ci.md).
 
-## ⏭ Next to be done: Agent A, step 3, local iteration
-- **What:** run the agent on my machine (`claude -p "/tf-blast-radius <folder>"`) against gather outputs and fix the skill until it traces correctly.
-- **How:** in a clean copy of the branch with `docs/` removed, so the eval answers aren't in reach.
-- **Why:** the first real test of the skill, before it costs CI runs.
-- **Inputs:**
-  - Now: PR #2's artifact (diff-only, dev down).
-  - Later, with dev up: artifacts with real plans for the doc's example trace (VPC CIDR change).
-- **Done when:** the agent produces evidence-backed impacts on those inputs, and the doc's example trace works.
+## ⏭ Next to be done: Agent A, step 4, the output schema
+- **What:** `.github/claude/blast-radius-schema.json`, the exact JSON shape the agent must return. Claude Code enforces it with `--json-schema`.
+- **Why:** publish renders fields, never free text. The local runs also showed what's needed:
+  - `evidence` as a list of `path:line`, not one string joined with commas, so publish can check each one.
+  - `untraced` as `{item, reason}` objects.
+  - No extra fields.
+- **Done when:** the schema exists, matches the design doc's fields, and a local run with `--json-schema` returns valid output.
 
 ---
 
@@ -67,11 +66,23 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
   - Two examples that pointed at real answers were made neutral.
 - **Found: the design doc holds the eval answers.** The agent can search the whole repo, so the agent job (step 5) and local runs (step 3) must not contain `docs/`.
 
-### 3. Local iteration ⏭ Next to be done
-See the top of this file.
+### 3. Local iteration ✅ Done
+- **What:** ran the agent on my machine with CI's settings (read-only tools, 25 turns) in a clean copy without `docs/`.
+- **Run 1, PR #2's real artifact (two tag changes):**
+  - First result: verdict high (wrong), cosmetic "impacts", and a false "dev rebuild" (it couldn't tell which branch the PR merges into).
+  - Fixed:
+    - tag-only is low on any resource;
+    - the skill defines what an impact is and matches effort to risk;
+    - `gather.json` now has `base_ref`.
+  - Re-run: **medium (correct)**, no noise, 20 turns instead of 28.
+- **Run 2, a synthetic AZ change (deep trace; not an eval case):**
+  - **high**, and it followed the subnet IDs through 3 pass-through steps into the cluster root, then into the node group and the cluster, with `path:line` evidence.
+  - It added apply-order and AZ-support risks, and left unknowns in `untraced` instead of guessing.
+- **Why it counts:** the skill now traces correctly and grades correctly on real and deep inputs.
+- **Still to see:** the doc's VPC CIDR example with a real plan. That's the smoke test at the dev-up stop.
 
-### 4. Output schema ⬜ To do
-- The JSON shape of the answer: findings, impacts, evidence, what wasn't traced.
+### 4. Output schema ⏭ Next to be done
+See the top of this file.
 
 ### 5. Full workflow ⬜ To do
 - gather → agent → publish, with publish checking every cited file exists. v1 is removed.
