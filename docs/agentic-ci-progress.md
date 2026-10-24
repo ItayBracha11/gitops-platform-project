@@ -2,22 +2,15 @@
 
 What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-ci.md).
 
-## ⏭ Next to be done: Agent A, step 5, the full workflow
-- **What:** finish `tf-blast-radius.yml`: gather (done) → **agent** → **publish**, and remove v1.
-  - **Agent job:**
-    - runs in `agent-review`;
-    - deletes `docs/` before running;
-    - runs `claude -p "/tf-blast-radius gather/"` with the schema;
-    - uploads the transcript;
-    - has the leak guard.
-  - **Publish job:**
-    - checks every `evidence` entry (format + file exists), marking failures "unverified";
-    - renders the fields;
-    - posts one PR comment.
-  - **v1:** remove `tf-plan-review.yml`, its skill and its schema.
-- **Why:** this turns the pieces into the reviewer that runs on every PR.
-- **Done when:** the workflow runs on a test PR (diff-only, while dev is down) and posts a comment.
-- 🛑 **Then the dev-up stop point** (see step 6).
+## 🛑 Next to be done: the dev-up stop point (then step 6, evals)
+- **What:** one session with dev up:
+  1. You bring dev up.
+  2. One smoke-test PR (a real plan, the doc's VPC CIDR example).
+  3. The eval batch: 7 PRs × 3 runs.
+  4. You destroy dev.
+- **Why now:** everything left to prove needs real plans: the gather job's planned path, tracing from a plan, and the evals. One apply/destroy covers all of it.
+- **Cost:** about $0.30/hour of AWS for a few hours, plus ~22 agent runs on your subscription (about $0.25–0.70 each at API prices).
+- **Done when:** the smoke test posts a correct planned review, the evals have run, and dev is destroyed.
 
 ---
 
@@ -99,13 +92,30 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
   - Why: the local runs joined paths with commas and added an unrequested field.
 - **Proof:** two local runs with the schema (the PR #2 tags and the AZ change) both returned valid output. All 14 evidence entries were well-formed and pointed at files that exist (the same check publish will make).
 
-### 5. Full workflow ⏭ Next to be done
-See the top of this file.
+### 5. Full workflow ✅ Done
+- **What:** `tf-blast-radius.yml` = gather → agent → publish. v1 is removed.
+  - **Agent:**
+    - deletes `docs/` first (eval answers);
+    - Opus 5.5 pinned;
+    - max 25 turns and **$2 per run**;
+    - fails clearly with no structured answer;
+    - uploads the answer and the transcript after the leak check.
+  - **Publish** (`render-review.py`, no AI):
+    - checks every citation (format, file inside the repo, line exists), with ⚠ marks and red above 1/3;
+    - shows one short quote per impact;
+    - risk checks: the verdict vs its findings, low despite deletes, low despite prod;
+    - one comment per PR with a one-line change note, and a stale line when a re-run fails.
+  - **Fork PRs** are skipped (GitHub gives them no credentials).
+- **Why:** this is the reviewer that runs on every infra PR, with its output checked by code, not trusted blindly.
+- **Proof:**
+  - Locally: the publish script passed every synthetic case, including path traversal, fake markers and each risk check.
+  - In CI, test PR #3 (closed, not merged): the full run posted a correct low review. On a new commit, the same comment was edited with "No change since …".
+- **Fixed along the way:**
+  - The agent searched outside the repo and gave up. The skill now says to stay inside and retry.
+  - CI ran Sonnet by default, so Opus is now pinned (your choice).
+- **Not proven in CI:** the stale line after a failed run (tested only locally) and the planned path (dev up).
 
-- gather → agent → publish, with publish checking every cited file exists. v1 is removed.
-- The agent job deletes `docs/` before running (the eval answers live there).
-
-### 6. Evals ⬜ To do
+### 6. Evals ⏭ Next to be done (starts with the dev-up stop)
 - 🛑 **Dev-up stop point (agreed): right after step 5.** One session:
   1. Bring dev up.
   2. One smoke-test PR proves the gather planned path, the agent in CI, and publish.
