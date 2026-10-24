@@ -83,12 +83,15 @@ Cite only lines you have read. If you can't point to a line, the impact doesn't 
 
 ## Output
 
-Return only the fields of the provided JSON schema, nothing extra:
+Return only the fields of the provided JSON schema, nothing extra. The review is read on a PR,
+so keep every text short. Citations go in `evidence`, never in the prose.
 
 - `verdict`.
-- `summary`: two or three sentences a reviewer can act on. Say if the review was diff-only.
-- `findings[]`: `resource`, `action`, `risk`, `why`, and `impacts[]` (`affected`, `how`,
-  `evidence`). A finding with no consumers has an empty `impacts`.
+- `summary`: at most three short sentences a reviewer can act on. Say if the review was
+  diff-only.
+- `findings[]`: `resource`, `action`, `risk`, `why` (one or two sentences), and `impacts[]`
+  (`affected`, `how` in one or two sentences, `evidence`). A finding with no consumers has an
+  empty `impacts`.
   - `evidence` is a list. Each entry is one `path:line` or `path:start-end`, never several joined
     together.
 - `untraced[]`: objects with `item` (what you didn't trace) and `reason` (why).

@@ -68,7 +68,7 @@ The first version of the reviewer classified a single plan file as low, medium o
 3. **Least privilege per job.** The agent job gets `contents: read` and `persist-credentials: false` (no git token left on disk), plus `id-token: write` to reach Claude through federation (Section 4), so it holds no model API key. For Agent B, it also gets a scoped read-only AWS role.
 4. **Evidence or it didn't happen.** Every claim carries `path:line`, a log line or an AWS resource ID. Publish validates what it can and marks the rest "unverified".
 5. **Structured output only.** `--json-schema` defines the answer; publish renders fields, never free text.
-6. **Bounded.** `--max-turns`, `timeout-minutes`, and `total_cost_usd` logged on every run.
+6. **Bounded.** `--max-turns`, `--max-budget-usd` (a hard spend cap per run), `timeout-minutes`, and `total_cost_usd` logged on every run.
 7. **Proof of agency.** The session transcript is uploaded as an artifact, so the model's chosen path is reviewable.
 8. **Untrusted input is data.** PR text, diffs, logs, tag values and AWS resource names are treated as data. CLAUDE.md states it; permissions enforce it.
 9. **CI-only settings live in `.github/claude/`,** not in `.claude/settings.json`, which would also lock down local sessions.
@@ -122,6 +122,7 @@ flowchart LR
 
 ### Trigger
 `pull_request` on `infra/**`, `gitops/**` and `.github/workflows/terraform-*`.
+- Fork PRs are skipped, not failed. GitHub gives them no secrets and no OIDC token, so nothing could run. Never switch to `pull_request_target` to "fix" this: it would run fork code with this repo's credentials.
 
 ### Gather job (deterministic, environment `tf-plan`)
 - Detect changed roots: `git diff --name-only <PR base sha>...<PR head sha>` (checkout with `fetch-depth: 0`). Diffing against the PR's own base, not `main`, keeps PRs into work branches accurate.
@@ -184,15 +185,24 @@ A tag-only PR stops after step 1. That variation is the loop.
 - `evidence` is a list with one `path:line` (or `path:start-end`) per entry, so publish can check each one. In early local runs the agent joined several paths into one string.
 - The `path:line` format and the existence of each file are checked by publish, not by the schema.
 
+### Agent job limits and outputs
+- `--max-turns 25` and `--max-budget-usd 2.00` (about 3× the heaviest local run). The step fails unless the run ends with `subtype: success` and a structured answer.
+- The session transcript is copied from `~/.claude/projects/**/<session_id>.jsonl` and uploaded with `result.json`. A leak guard first blocks any output containing `sk-ant-`.
+
 ### Publish job
-Verify the agent's evidence before posting:
-```bash
-jq -r '.structured_output.findings[].impacts[]?.evidence' result.json \
-  | cut -d: -f1 | sort -u | while read -r f; do
-      [ -f "$f" ] || echo "::warning::Agent cited a missing file: $f"
-    done
-```
-Then render markdown and post with `gh pr comment` (`pull-requests: write`).
+`.github/scripts/render-review.py`. It's deterministic and the only job that writes (`pull-requests: write`).
+- **Evidence check:** every entry must be `path:line` or `path:start-end`, the file must exist inside the repo (or `gather/`), and the line must be within the file.
+  - Verified entries link to the exact lines at the commit the agent read. Each impact shows one short quote of its first cited line.
+  - Unverified entries are marked ⚠. The check goes red if more than 1/3 are unverified.
+- **Risk checks** (no LLM, they flag and never override):
+  - the verdict is below its highest finding;
+  - the verdict is `low` while the hard gate counted deletes or replaces;
+  - the verdict is `low` while a prod root changed.
+  - Any of these is a ⚠ line and a red check.
+- **One comment per PR,** edited on re-runs. A hidden marker stores the last commit, verdict and per-risk counts. The re-run note is one line: what changed, or "no change". On the same commit, it notes that differences come from the agent.
+- **Failed re-run:** the existing comment gets one line, "latest run on X failed; the review below is for Y".
+- **Agent text is data:** `<` and `>` are escaped (no HTML, no fake markers) and `@mentions` are broken. The previous comment is only read from `github-actions[bot]`.
+- **Compact output:** low findings with no impacts get one line each; untraced and not-planned items are collapsed.
 
 ### Files
 - `.claude/skills/tf-blast-radius/SKILL.md`, `trace-guide.md`, `risk-checklist.md`
@@ -337,7 +347,7 @@ Open an issue labeled `ci-failure` with the report and a link to the failed run 
 - [x] Skill, `trace-guide.md`, `risk-checklist.md`
 - [x] Local iteration: `claude -p` against gather outputs (PR #2's real artifact and a synthetic AZ change). The example trace with a real plan runs as the smoke test at the dev-up stop.
 - [x] Schema and CI settings
-- [ ] Workflow
+- [x] Workflow
 - [ ] Eval PRs pass the acceptance criteria
 
 ### Phase 2: Agent B (branch `agent-b-failure-investigator`). Starts only after Phase 1 is accepted
