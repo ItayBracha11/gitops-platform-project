@@ -24,4 +24,5 @@ nat_gateway_count  = 1
 tags = {
   Project     = "gitops-platform"
   Environment = "dev"
+  WorkflowTest = "true"
 }
