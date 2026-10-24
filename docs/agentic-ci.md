@@ -186,6 +186,7 @@ A tag-only PR stops after step 1. That variation is the loop.
 - The `path:line` format and the existence of each file are checked by publish, not by the schema.
 
 ### Agent job limits and outputs
+- `--model claude-opus-5-5`, pinned. Unpinned, CI ran Sonnet by default while every local test used Opus, so evals wouldn't be measuring the tested setup.
 - `--max-turns 25` and `--max-budget-usd 2.00` (about 3× the heaviest local run). The step fails unless the run ends with `subtype: success` and a structured answer.
 - The session transcript is copied from `~/.claude/projects/**/<session_id>.jsonl` and uploaded with `result.json`. A leak guard first blocks any output containing `sk-ant-`.
 
