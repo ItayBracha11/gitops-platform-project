@@ -1,7 +1,7 @@
 aws_region   = "us-east-1"
 cluster_name = "eks-gitops-demo-dev"
 
-cidr_block = "10.0.0.0/16"
+cidr_block = "10.1.0.0/16"
 
 public_subnet_cidrs = [
   "10.0.1.0/24",
