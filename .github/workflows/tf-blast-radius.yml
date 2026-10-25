@@ -266,7 +266,7 @@ jobs:
             gh pr comment "$PR" --repo "$REPO" --body-file comment.md
           fi
           if [ "$RC" -eq 3 ]; then
-            echo "::error::Risk checks or the evidence check failed. See the ⚠ lines in the PR comment."
+            echo "::error::Risk checks or the evidence check failed. See the warning in the PR comment."
             exit 1
           fi
       - name: Mark the previous review stale (agent failed)

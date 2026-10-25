@@ -199,11 +199,14 @@ A tag-only PR stops after step 1. That variation is the loop.
   - the verdict is below its highest finding;
   - the verdict is `low` while the hard gate counted deletes or replaces;
   - the verdict is `low` while a prod root changed.
-  - Any of these is a ⚠ line and a red check.
+  - Any of these appears as a warning box at the top of the comment, and the check goes red.
 - **One comment per PR,** edited on re-runs. A hidden marker stores the last commit, verdict and per-risk counts. The re-run note is one line: what changed, or "no change". On the same commit, it notes that differences come from the agent.
 - **Failed re-run:** the existing comment gets one line, "latest run on X failed; the review below is for Y".
 - **Agent text is data:** `<` and `>` are escaped (no HTML, no fake markers) and `@mentions` are broken. The previous comment is only read from `github-actions[bot]`.
-- **Compact output:** low findings with no impacts get one line each; untraced and not-planned items are collapsed.
+- **Layout, for a human skim:** a colored verdict header (🔴 🟡 🟢) and one status line (mode, hard-gate count, evidence, commit), then the summary.
+  - "What else breaks": findings with consumers, highest risk first, with evidence in small print under each impact.
+  - Findings with no consumers go in one table; untraced and not-planned items are collapsed.
+  - Agent text is escaped, so it can't add links, images, emphasis or headings.
 
 ### Files
 - `.claude/skills/tf-blast-radius/SKILL.md`, `trace-guide.md`, `risk-checklist.md`
