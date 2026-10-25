@@ -19,7 +19,7 @@ azs = [
 ]
 
 enable_nat_gateway = true
-nat_gateway_count  = 1
+nat_gateway_count  = 2
 
 tags = {
   Project     = "gitops-platform"
