@@ -1,9 +1,22 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["verdict", "summary", "findings", "untraced", "not_planned_roots"],
+  "required": ["verdict", "dangers", "summary", "findings", "next_steps", "untraced", "not_planned_roots"],
   "properties": {
     "verdict": { "type": "string", "enum": ["low", "medium", "high"] },
+    "dangers": {
+      "type": "array",
+      "description": "What goes wrong if this merges and is applied, most severe first. One plain sentence each.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["risk", "text"],
+        "properties": {
+          "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+          "text": { "type": "string" }
+        }
+      }
+    },
     "summary": { "type": "string" },
     "findings": {
       "type": "array",
@@ -35,6 +48,11 @@
           }
         }
       }
+    },
+    "next_steps": {
+      "type": "array",
+      "description": "Suggested actions for the PR author, in order. One sentence each.",
+      "items": { "type": "string" }
     },
     "untraced": {
       "type": "array",

@@ -7,8 +7,9 @@ render: result.json + gather.json + previous comment -> comment.md
         risk check failed).
 stale:  previous comment -> the same comment with one "latest run failed" note on top.
 
-Layout: verdict header and one status line, the agent's summary, "What else breaks" (findings
-with consumers, evidence in small print), a table of the other changes, then collapsed extras.
+Layout, for a skim: the verdict with the dangers in bold, one status line, the agent's summary,
+details (findings with consumers, evidence in small print), a table of the other changes,
+suggested next steps, then the review's limits, collapsed.
 """
 import argparse
 import json
@@ -107,6 +108,20 @@ def change_line(prev, sha, verdict, now_counts):
     return f"{lead}: " + " · ".join(parts) + tail + "."
 
 
+def basis(gather):
+    """What the review is based on, in plain words."""
+    planned = [code(p["root"]) for p in gather.get("planned", [])]
+    unplanned = [code(n["root"]) for n in gather.get("not_planned", [])]
+    if planned:
+        text = "Based on the Terraform plan for " + ", ".join(planned)
+        return text + (" and the code change for " + ", ".join(unplanned) if unplanned else "")
+    if gather.get("dev_state") == "torn_down":
+        return "Based on the code change only (dev is torn down, so Terraform couldn't plan it)"
+    if unplanned:
+        return "Based on the code change only (no Terraform plan for " + ", ".join(unplanned) + ")"
+    return "Based on the code change only"
+
+
 def render(a):
     result = json.load(open(a.result))
     out = result["structured_output"]
@@ -116,6 +131,7 @@ def render(a):
     verdict = out["verdict"]
     # Highest risk first; the agent's order is kept within a level.
     findings = sorted(out["findings"], key=lambda f: -LEVELS.index(f["risk"]))
+    dangers = sorted(out.get("dangers", []), key=lambda d: -LEVELS.index(d["risk"]))
     planned = gather.get("planned", [])
     hard_gate = sum(p.get("deletes_or_replaces", 0) for p in planned)
 
@@ -147,9 +163,11 @@ def render(a):
 
     # Deterministic risk checks on the agent's answer. They flag, never override.
     warnings = []
-    worst = max((LEVELS.index(f["risk"]) for f in findings), default=0)
+    worst = max((LEVELS.index(x["risk"]) for x in findings + dangers), default=0)
     if LEVELS.index(verdict) < worst:
-        warnings.append(f"Verdict {verdict} is lower than its highest finding ({LEVELS[worst]}).")
+        warnings.append(f"Verdict {verdict} is lower than its highest finding or danger ({LEVELS[worst]}).")
+    if verdict != "low" and not dangers:
+        warnings.append(f"Verdict {verdict}, but no danger is listed.")
     if hard_gate and verdict == "low":
         warnings.append(f"Verdict low, but the plan deletes or replaces {hard_gate} resource(s).")
     if verdict == "low" and any(r.startswith("prod/") for r in gather.get("changed_roots", [])):
@@ -158,17 +176,20 @@ def render(a):
     if total and unverified * 3 > total:
         warnings.append(f"Most evidence could not be verified ({unverified}/{total}). Don't rely on this review.")
 
-    # Header: verdict, then one status line: what was reviewed, the no-LLM hard gate, evidence, commit.
-    if planned:
-        status = ["planned " + ", ".join(code(p["root"]) for p in planned)]
-    else:
-        status = ["diff-only" + (" (dev is torn down)" if gather.get("dev_state") == "torn_down" else "")]
+    # Header: the verdict and the dangers in bold, then one status line: what the review is based
+    # on, the no-LLM hard gate, evidence, commit.
+    lines = [f"### {ICON[verdict]} Blast radius: {verdict.upper()}", ""]
+    if dangers:
+        lines += [f"- {ICON[d['risk']]} **{clean(d['text'])}**" for d in dangers]
+    elif verdict == "low":
+        lines.append("✅ **Nothing else breaks.**")
+    status = [basis(gather)]
     if hard_gate:
-        status.append(f"**{hard_gate} deletes/replaces**")
+        status.append(f"**{hard_gate} resource{'s' if hard_gate > 1 else ''} deleted or replaced**")
     if total:
-        status.append(f"evidence {verified}/{total} " + ("✅" if not unverified else "⚠️"))
+        status.append(f"evidence {verified}/{total} verified " + ("✅" if not unverified else "⚠️"))
     status.append(f"commit {code(a.sha[:7])}")
-    lines = [f"### {ICON[verdict]} Blast radius: {verdict.upper()}", " · ".join(status)]
+    lines += ["", " · ".join(status)]
 
     note = change_line(prev, a.sha, verdict, counts(findings))
     if note:
@@ -178,22 +199,25 @@ def render(a):
     lines += ["", clean(out["summary"])]
 
     if breaks:
-        lines += ["", "#### What else breaks"] + breaks
+        lines += ["", "#### Details and evidence"] + breaks
 
     others = [f for f in findings if not f["impacts"]]
     if others:
-        lines += ["", "#### Other changes, no consumers found" if breaks else "#### Changes, no consumers found", "",
+        heading = "Other changes" if breaks else "Changes"
+        lines += ["", f"#### {heading} (nothing else depends on them)", "",
                   "| | Resource | Change | Why |", "|:-:|---|---|---|"]
         lines += [f"| {ICON[f['risk']]} | {clean(f['resource'])} | {clean(f['action'])} | {clean(f['why'])} |"
                   for f in others]
 
+    steps = out.get("next_steps", [])
+    if steps:
+        lines += ["", "#### Suggested next steps", ""] + [f"{i}. {clean(s)}" for i, s in enumerate(steps, 1)]
+
     untraced, not_planned = out.get("untraced", []), out.get("not_planned_roots", [])
     if untraced or not_planned:
-        label = " · ".join(p for p in [f"Not traced ({len(untraced)})" if untraced else "",
-                                       f"Not planned ({len(not_planned)})" if not_planned else ""] if p)
-        lines += ["", f"<details><summary>{label}</summary>", ""]
-        lines += [f"- Not traced: **{clean(u['item'])}**: {clean(u['reason'])}" for u in untraced]
-        lines += [f"- Not planned: {code(n['root'])}: {clean(n['reason'])}" for n in not_planned]
+        lines += ["", f"<details><summary>Limits of this review ({len(untraced) + len(not_planned)})</summary>", ""]
+        lines += [f"- Not checked: **{clean(u['item'])}**: {clean(u['reason'])}" for u in untraced]
+        lines += [f"- No Terraform plan for {code(n['root'])}: {clean(n['reason'])}" for n in not_planned]
         lines += ["", "</details>"]
 
     meta = [f"[Run]({a.run_url})" if a.run_url else "Run"]
