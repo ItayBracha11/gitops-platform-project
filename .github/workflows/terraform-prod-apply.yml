@@ -26,8 +26,23 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Nothing touches prod until a required reviewer approves the `prod` environment.
+  # Only this job uses the environment, so the AWS role's OIDC subject is unchanged.
+  approve:
+    name: Approve prod apply
+    runs-on: ubuntu-24.04
+    environment: prod
+    permissions: {}
+    steps:
+      - name: Approved
+        env:
+          ACTOR: ${{ github.actor }}
+          EVENT: ${{ github.event_name }}
+        run: echo "Prod apply of ${GITHUB_SHA::7} approved ($EVENT by $ACTOR)."
+
   network:
     name: Prod Network
+    needs: approve
     uses: ./.github/workflows/terraform-prod-network.yml
     secrets: inherit
 
