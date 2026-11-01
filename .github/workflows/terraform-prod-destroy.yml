@@ -14,8 +14,22 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Nothing touches prod until a required reviewer approves the `prod` environment.
+  # Only this job uses the environment, so the AWS role's OIDC subject is unchanged.
+  approve:
+    name: Approve prod destroy
+    runs-on: ubuntu-24.04
+    environment: prod
+    permissions: {}
+    steps:
+      - name: Approved
+        env:
+          ACTOR: ${{ github.actor }}
+        run: echo "Prod destroy of ${GITHUB_SHA::7} approved (by $ACTOR)."
+
   prepare-destroy-context:
     name: Prepare destroy context
+    needs: approve
     runs-on: ubuntu-24.04
 
     env:
@@ -41,7 +55,7 @@ jobs:
 
       - name: Terraform Init (network)
         working-directory: infra/environments/prod/network
-        run: terraform init -input=false
+        run: terraform init -input=false -lockfile=readonly
 
       - name: Read network state outputs
         id: network_outputs
@@ -55,7 +69,7 @@ jobs:
 
       - name: Terraform Init (cluster)
         working-directory: infra/environments/prod/cluster
-        run: terraform init -input=false
+        run: terraform init -input=false -lockfile=readonly
 
       - name: Read cluster state outputs
         id: cluster_outputs

@@ -1,0 +1,165 @@
+# Agentic CI: progress log
+
+What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-ci.md).
+
+## ⏭ Next to be done: step 7, acceptance (your call)
+- **Where we are:** every eval passed (step 6). Agent A is ready for acceptance.
+- **Left to do, both yours to decide:**
+  1. Close the eval PRs #4–#10 without merging. I'll do it once you OK it.
+  2. Merge `agent-a-blast-radius` into `main`, and decide on `[skip ci]`: a merge to `main` runs the dev and prod applies.
+- **Then:** Agent B (the failure investigator), on its own branch.
+
+---
+
+## Groundwork
+
+### 1. Provider lock files ✅ Done
+- **What:** `.terraform.lock.hcl` committed in all 9 roots. CI runs `init -lockfile=readonly`, and a workflow, run by hand, opens PRs that upgrade providers.
+- **Why:** the plan that gets reviewed and the apply that follows use the same provider versions. Upgrades become reviewable PRs.
+- **Proof:** PR #1. The bot opened it, the plan passed, the review was posted, and it was merged into `agentic-pipeline`.
+
+### 2. Foundation (Phase 0) ✅ Done
+- **What:** the design doc was added, and CLAUDE.md updated: agents may read AWS but never write (no kubectl/helm changes either).
+- **What:** a local `readonly` AWS profile for my session. No S3 (state holds secrets), and no `ec2:Get*`.
+- **Why:** I can investigate AWS without being able to change anything.
+
+### 3. CI credentials ✅ Done
+- **AWS:** role `tf-plan-reader`, read-only, usable only by the `tf-plan` environment, and it can't read prod state.
+  - **Why:** the plan job needs to read dev; nothing else gets the role.
+- **Claude:** federation set up and tested; it's trusted only for the `agent-review` environment.
+  - For now the job uses your subscription token, because there's no API credit.
+  - Guards: the agent can't read `/proc`, and output containing a real Anthropic key or token, or this run's token, is blocked.
+  - **Why:** no stored API key. One environment = one identity.
+- **The v1 reviewer runs end to end:** plan → Claude review → PR comment.
+
+---
+
+## Agent A ("what else breaks?")
+
+### 1. Gather job ✅ Done
+- **What:** the first job of `tf-blast-radius.yml`. No AI.
+  - It finds which roots a PR changed.
+  - It plans the dev network and cluster roots.
+  - It counts deletes.
+  - It packages the evidence: `gather.json`, `pr.diff`, plan text files.
+- **Why:** the agent gets evidence, never AWS credentials.
+- **Safety:** plan files with full values are deleted right after use; only the masked text is kept.
+- **Proof:** test PR #2 (closed, not merged). Dev was down, so nothing was planned, and the correct reason was recorded for each root.
+- **Real plans:** proven in step 6. Evals 1–5 planned the dev network and cluster roots on a live dev.
+
+### 2. Skill ✅ Done
+- **What:** `.claude/skills/tf-blast-radius/`:
+  - `SKILL.md`: inputs, modes, procedure, evidence rules, output.
+  - `trace-guide.md`: 7 ways couplings hide, and how to search for each.
+  - `risk-checklist.md`: v1's network rules plus cluster, platform, GitOps and workflow rules.
+- **Why:** the gather job gives evidence; the skill says how to turn it into "what else breaks", with proof.
+- **Tracing rule:** follow the changed value itself as far as it goes (pass-throughs don't count as hops). Where it's used to build something new, follow that one hop. Anything unfinished goes in `untraced`.
+  - Why: a fixed hop count breaks when pass-through chains get longer, and going too deep makes everything look impacted.
+- **No eval answers in the skill:** searched for the evals' expected impacts (values file, ALB, workflow names, …); none found.
+  - Why: otherwise the agent passes evals by copying and they prove nothing.
+- **Input folder passed as an argument** (`/tf-blast-radius gather/`), so the same command works in CI and locally.
+- **Reviewed and fixed:**
+  - It now acts on `gather.json` notes.
+  - Every counted delete must become a finding.
+  - Diff-only actions are marked "expected".
+  - Two examples that pointed at real answers were made neutral.
+- **Found: the design doc holds the eval answers.** The agent can search the whole repo, so the agent job (step 5) and local runs (step 3) must not contain `docs/`.
+
+### 3. Local iteration ✅ Done
+- **What:** ran the agent on my machine with CI's settings (read-only tools, 25 turns) in a clean copy without `docs/`.
+- **Run 1, PR #2's real artifact (two tag changes):**
+  - First result: verdict high (wrong), cosmetic "impacts", and a false "dev rebuild" (it couldn't tell which branch the PR merges into).
+  - Fixed:
+    - tag-only is low on any resource;
+    - the skill defines what an impact is and matches effort to risk;
+    - `gather.json` now has `base_ref`.
+  - Re-run: **medium (correct)**, no noise, 20 turns instead of 28.
+- **Run 2, a synthetic AZ change (deep trace; not an eval case):**
+  - **high**, and it followed the subnet IDs through 3 pass-through steps into the cluster root, then into the node group and the cluster, with `path:line` evidence.
+  - It added apply-order and AZ-support risks, and left unknowns in `untraced` instead of guessing.
+- **Why it counts:** the skill now traces correctly and grades correctly on real and deep inputs.
+- **Still to see:** the doc's VPC CIDR example with a real plan. That's the smoke test at the dev-up stop.
+
+### 4. Output schema ✅ Done
+- **What:** `.github/claude/blast-radius-schema.json`. The agent must return exactly these fields; Claude Code enforces it.
+- **Changes from the doc:**
+  - `evidence` is a list of `path:line`.
+  - `untraced` items are `{item, reason}`.
+  - No extra fields allowed.
+  - Why: the local runs joined paths with commas and added an unrequested field.
+- **Proof:** two local runs with the schema (the PR #2 tags and the AZ change) both returned valid output. All 14 evidence entries were well-formed and pointed at files that exist (the same check publish will make).
+
+### 5. Full workflow ✅ Done
+- **What:** `tf-blast-radius.yml` = gather → agent → publish. v1 is removed.
+  - **Agent:**
+    - deletes `docs/` first (eval answers);
+    - Opus 5.5 pinned;
+    - max 25 turns and **$2 per run**;
+    - fails clearly with no structured answer;
+    - uploads the answer and the transcript after the leak check.
+  - **Publish** (`render-review.py`, no AI):
+    - checks every citation (format, file inside the repo, line exists), with ⚠ marks and red above 1/3;
+    - shows one short quote per impact;
+    - risk checks: the verdict vs its findings, low despite deletes, low despite prod;
+    - one comment per PR with a one-line change note, and a stale line when a re-run fails.
+  - **Fork PRs** are skipped (GitHub gives them no credentials).
+- **Why:** this is the reviewer that runs on every infra PR, with its output checked by code, not trusted blindly.
+- **Proof:**
+  - Locally: the publish script passed every synthetic case, including path traversal, fake markers and each risk check.
+  - In CI, test PR #3 (closed, not merged): the full run posted a correct low review. On a new commit, the same comment was edited with "No change since …".
+- **Fixed along the way:**
+  - The agent searched outside the repo and gave up. The skill now says to stay inside and retry.
+  - CI ran Sonnet by default, so Opus is now pinned (your choice).
+- **Not proven in CI:** the stale line after a failed run (tested only locally).
+
+### 6. Evals ✅ Done
+- **What:** 7 eval PRs (#4–#10), 3 runs each = 21 runs.
+  - Run 1 in CI.
+  - Runs 2 and 3 locally on the same saved evidence, so any difference comes only from the agent.
+  - Dev was up for evals 1–6 and torn down for eval 7.
+- **Result: every acceptance check passes.**
+  - Expected verdict: 21/21.
+  - Expected impacts and behavior: 21/21. That covers the values file and ALB app, the subnet tags and hardcoded workflow names, the injection reported, and the "couldn't plan" reasons.
+  - Evidence: 225/225 citations verified; no risk-check warnings.
+  - Different paths for different PRs: the tag PR made 7–8 tool calls and stopped, the cluster rename 16–20.
+  - No AWS credentials and no write token in the agent job (checked in the CI log).
+- **Also proven:**
+  - The gather job's planned path on a live dev, including the first real cluster plan.
+  - The diff-only path when dev is torn down. Eval 7 still reached the same verdict as eval 1.
+- **Same PR, same answer?** The verdict and main impacts repeat; the path and wording vary. That's expected from an agent, and it's why each eval runs 3 times.
+- **Changed during the evals (your requests):**
+  - A cleaner comment: a colored verdict, a plain-words status line, details with evidence in small print, one table for the changes nothing depends on.
+  - Bold danger lines at the top and suggested next steps at the end. These are two new answer fields.
+  - The skill changed, so round 1 was re-run and every result comes from the final version.
+- **Worth watching:** eval 3 lists two in-module notes as impacts (the route still uses one NAT gateway). It did so in all 3 runs, and it's defensible.
+- **Cost:** about $6 of subscription usage at API prices for the 21 runs, plus about $2.60 for runs replaced along the way.
+- **Where:** results and scripts are in `.evals/`, kept out of git.
+
+### 7. Acceptance ⏭ Next to be done
+- Every eval passed. Merging to `main` is your call (see the top of this file).
+
+---
+
+## Branches
+- `agentic-pipeline`: v1 reviewer, lock files, Claude access.
+- `agentic-foundation`: Phase 0 + docs.
+- `agent-a-blast-radius`: Agent A work. **Current branch.**
+- Nothing merges to `main` until Agent A passes step 7. I ask before every merge.
+
+## Decisions made
+- One skill for all roots.
+- Dev only; prod PRs get a diff-only review.
+- One agent run per PR.
+- v1 is replaced, not kept.
+- The gather job diffs against the PR's own base, not `main`.
+- Tracing: follow the value through pass-throughs, one hop past where it builds something new.
+- Evals: run 1 in CI, runs 2 and 3 locally on the saved evidence (less time with dev up).
+- The PR comment leads with what breaks and ends with suggested next steps.
+
+## Later
+- Approval gate on the prod apply workflow.
+- Tighten `tf-plan-reader` further, to only what a dev plan reads.
+- Move off the subscription token once there's API credit.
+- Agent runs longer than ~9 min need a refreshed token for federation.
+- Decide on `[skip ci]` for the final merge to `main`, which otherwise triggers the dev and prod applies.
+- Decide whether to commit the eval scripts. They're in `.evals/` and kept out of git because they hold the expected answers, which the agent must never see.

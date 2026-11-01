@@ -34,7 +34,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
-        run: terraform init -input=false
+        run: terraform init -input=false -lockfile=readonly
 
       - name: Show network destroy context
         run: |

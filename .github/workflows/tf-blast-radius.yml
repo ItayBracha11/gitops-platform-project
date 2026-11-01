@@ -1,0 +1,283 @@
+name: TF Blast Radius
+on:
+  pull_request:
+    paths:
+      - 'infra/**'
+      - 'gitops/**'
+      - '.github/workflows/terraform-*'
+
+permissions: {}                    # nothing by default; each job asks for its own
+
+concurrency:
+  group: tf-blast-radius-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gather:                          # deterministic, privileged (AWS read-only), no LLM
+    # Fork PRs get no credentials from GitHub, so nothing here could run: skip instead of failing.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: tf-plan           # the only job the AWS plan role trusts
+    permissions:
+      contents: read
+      id-token: write              # OIDC to AWS, no static keys
+    env:
+      TF_IN_AUTOMATION: true
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}   # the PR's own base, not main
+      BASE_REF: ${{ github.event.pull_request.base.ref }}   # target branch: decides what a merge triggers
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      OUT: ${{ github.workspace }}/gather                   # everything in here becomes the artifact
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0           # both base and head commits, for the diff
+          persist-credentials: false
+
+      - name: Changed files and roots
+        run: |
+          mkdir -p "$OUT"
+          git diff --name-only "$BASE_SHA...$HEAD_SHA" > "$OUT/changed-files.txt"
+          git diff "$BASE_SHA...$HEAD_SHA" > "$OUT/pr.diff"
+          bash .github/scripts/changed-roots.sh < "$OUT/changed-files.txt" > "$OUT/changed-roots.txt"
+          echo "Changed roots:"; cat "$OUT/changed-roots.txt"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false # plain stdout, so terraform output can be captured
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.TF_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Is dev up?
+        id: dev
+        working-directory: infra/environments/dev/network
+        run: |
+          terraform init -input=false -lockfile=readonly
+          # A destroyed environment leaves the network state with no outputs. Read the
+          # count on its own line so an AWS or state error fails the step instead of
+          # looking like "torn down".
+          OUTPUT_COUNT=$(terraform output -json | jq 'length')
+          if [ "$OUTPUT_COUNT" -gt 0 ]; then STATE=up; else STATE=torn_down; fi
+          echo "state=$STATE" >> "$GITHUB_OUTPUT"
+          echo "dev is $STATE"
+
+      - name: Plan changed dev roots, hard gate, gather.json
+        env:
+          DEV_STATE: ${{ steps.dev.outputs.state }}
+        run: |
+          set -euo pipefail
+          echo '[]' > /tmp/planned.json
+          echo '[]' > /tmp/not_planned.json
+          append() { jq --argjson o "$2" '. + [$o]' "$1" > "$1.tmp" && mv "$1.tmp" "$1"; }
+          skip() { append /tmp/not_planned.json "$(jq -n --arg r "$1" --arg why "$2" '{root: $r, reason: $why}')"; }
+
+          while read -r ROOT; do
+            [ -z "$ROOT" ] && continue
+            case "$ROOT" in
+              dev/network|dev/cluster)
+                if [ "$DEV_STATE" != up ]; then skip "$ROOT" "dev is torn down (network state has no outputs)"; continue; fi ;;
+              dev/platform|dev/bootstrap) skip "$ROOT" "needs cluster API access"; continue ;;
+              prod/*)                     skip "$ROOT" "dev only: prod roots are not planned"; continue ;;
+              backend)                    skip "$ROOT" "backend bootstrap root has no remote state"; continue ;;
+              *)                          skip "$ROOT" "not a known root"; continue ;;
+            esac
+
+            DIR="infra/environments/$ROOT"
+            PLAN_FILE="plan-${ROOT//\//-}.txt"
+            terraform -chdir="$DIR" init -input=false -lockfile=readonly
+
+            if [ "$ROOT" = dev/cluster ]; then
+              # Use the live value so the plan doesn't show a false endpoint-access change.
+              CLUSTER=$(terraform -chdir="$DIR" output -raw cluster_name 2>/dev/null || true)
+              if [ -n "$CLUSTER" ] && CIDRS=$(aws eks describe-cluster --name "$CLUSTER" \
+                   --query cluster.resourcesVpcConfig.publicAccessCidrs --output json 2>/dev/null); then
+                echo "public_access_cidrs from live cluster $CLUSTER"
+              else
+                # No cluster: nothing to drift from, so the runner IP (as the cluster workflow uses) is fine.
+                CIDRS="[\"$(curl -s https://checkip.amazonaws.com | tr -d '\n')/32\"]"
+                echo "no live cluster: public_access_cidrs = runner IP"
+              fi
+              export TF_VAR_public_access_cidrs="$CIDRS"
+            fi
+
+            terraform -chdir="$DIR" plan -input=false -lock=false -var-file=dev.tfvars -out=tfplan
+            terraform -chdir="$DIR" show -no-color tfplan > "$OUT/$PLAN_FILE"   # sensitive values masked
+            terraform -chdir="$DIR" show -json tfplan > /tmp/plan.json          # plain-text secrets: never leaves this job
+            N=$(jq '[.resource_changes[]? | select(.change.actions | index("delete"))] | length' /tmp/plan.json)
+            rm -f /tmp/plan.json "$DIR/tfplan"   # both hold full values; only the masked text is kept
+            if [ "$N" -gt 0 ]; then echo "::warning::$ROOT plan deletes or replaces $N resource(s)"; fi
+            append /tmp/planned.json "$(jq -n --arg r "$ROOT" --arg f "$PLAN_FILE" --argjson n "$N" \
+              '{root: $r, plan_file: $f, deletes_or_replaces: $n}')"
+          done < "$OUT/changed-roots.txt"
+
+          NOTES='[]'
+          if [ "$(jq '[.[].root] | (index("dev/network") != null) and (index("dev/cluster") != null)' /tmp/planned.json)" = true ]; then
+            NOTES='["The cluster plan reads the current network state, so network changes in this PR are not reflected in it."]'
+          fi
+          jq -n --arg base "$BASE_SHA" --arg base_ref "$BASE_REF" --arg head "$HEAD_SHA" --arg dev "$DEV_STATE" \
+            --rawfile roots "$OUT/changed-roots.txt" \
+            --slurpfile planned /tmp/planned.json --slurpfile not_planned /tmp/not_planned.json \
+            --argjson notes "$NOTES" \
+            '{base_ref: $base_ref, base_sha: $base, head_sha: $head, dev_state: $dev,
+              changed_roots: ($roots | split("\n") | map(select(length > 0))),
+              planned: $planned[0], not_planned: $not_planned[0], notes: $notes}' > "$OUT/gather.json"
+          cat "$OUT/gather.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gather
+          path: gather/
+
+  agent:                           # agentic, unprivileged: no AWS, no write token
+    needs: gather
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: agent-review      # the only job the Claude federation rule trusts
+    permissions:
+      contents: read
+      id-token: write              # GitHub OIDC token, exchanged for a short-lived Claude token
+    env:                           # federation IDs, not secrets; no API key anywhere
+      ANTHROPIC_FEDERATION_RULE_ID: ${{ vars.ANTHROPIC_FEDERATION_RULE_ID }}
+      ANTHROPIC_ORGANIZATION_ID: ${{ vars.ANTHROPIC_ORGANIZATION_ID }}
+      ANTHROPIC_SERVICE_ACCOUNT_ID: ${{ vars.ANTHROPIC_SERVICE_ACCOUNT_ID }}
+      ANTHROPIC_WORKSPACE_ID: ${{ vars.ANTHROPIC_WORKSPACE_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false   # no git token left on disk for the agent to find
+      - name: Keep the eval answers out of reach
+        run: rm -rf docs           # the design doc holds the eval table and the example trace
+      - uses: actions/download-artifact@v4
+        with:
+          name: gather
+          path: gather
+      - run: npm install -g @anthropic-ai/claude-code
+      # Claude Code exchanges this once at startup. The Claude token lives at most ~10 min
+      # (twice the GitHub token's remaining life), which covers a normal run.
+      - name: Fetch GitHub OIDC token for Claude
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const path = `${process.env.RUNNER_TEMP}/gha-jwt`;
+            const token = await core.getIDToken('https://api.anthropic.com');
+            core.setSecret(token);
+            require('fs').writeFileSync(path, token, { mode: 0o600 });
+            core.exportVariable('ANTHROPIC_IDENTITY_TOKEN_FILE', path);
+      - name: Agent traces the blast radius
+        env:
+          # Known gap: subscription token (no API credit). It outranks the federation vars,
+          # so deleting this secret switches the job back to federation.
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          set +e
+          claude -p "/tf-blast-radius gather/" \
+            --model claude-opus-5-5 \
+            --settings .github/claude/ci-settings.json \
+            --permission-mode dontAsk \
+            --max-turns 25 \
+            --max-budget-usd 2.00 \
+            --output-format json \
+            --json-schema "$(cat .github/claude/blast-radius-schema.json)" \
+            > result.json
+          RC=$?
+          set -e
+          echo "turns=$(jq '.num_turns' result.json 2>/dev/null) cost_usd=$(jq '.total_cost_usd' result.json 2>/dev/null)"
+          # A run that hit the turn or budget limit has no structured answer: fail loudly.
+          if [ "$RC" -ne 0 ] || [ "$(jq -r '.subtype' result.json 2>/dev/null)" != success ] \
+             || [ "$(jq '.structured_output != null' result.json 2>/dev/null)" != true ]; then
+            echo "::error::Agent run failed (subtype: $(jq -r '.subtype // "unknown"' result.json 2>/dev/null || echo unknown))"
+            cat result.json
+            exit 1
+          fi
+      - name: Keep the transcript (proof of agency)
+        run: |
+          SESSION=$(jq -r '.session_id' result.json)
+          find ~/.claude/projects -name "$SESSION.jsonl" -exec cp {} transcript.jsonl \;
+          [ -s transcript.jsonl ] || echo "::warning::No transcript found for session $SESSION"
+      - name: Block leaked Anthropic credentials   # before the artifact or a PR comment can carry one
+        env:
+          TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          # A real key or token (sk-ant-api03-…, sk-ant-oat01-…), or this run's own token. Not the bare
+          # prefix: a PR that touches this workflow or the docs contains it as plain text.
+          if grep -qsE 'sk-ant-[a-z]+[0-9]+-[A-Za-z0-9_-]{20,}' result.json transcript.jsonl \
+             || { [ -n "$TOKEN" ] && grep -qsFf <(printf '%s' "$TOKEN") result.json transcript.jsonl; }; then
+            echo "::error::Agent output contains an Anthropic credential. Not uploading or posting."
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: review
+          path: |
+            result.json
+            transcript.jsonl
+          if-no-files-found: warn
+
+  publish:                         # deterministic, the only writer
+    needs: [gather, agent]
+    # !cancelled(), not always(): a newer push cancels this run, and then nothing should be posted.
+    if: ${{ !cancelled() && github.event.pull_request.head.repo.full_name == github.repository && needs.gather.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read               # to check and quote the cited files
+      pull-requests: write         # to post or edit the one review comment
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      PR: ${{ github.event.pull_request.number }}
+      SHA: ${{ github.sha }}       # the merge commit the agent actually read
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: gather
+          path: gather
+      - uses: actions/download-artifact@v4
+        if: needs.agent.result == 'success'
+        with:
+          name: review
+          path: review
+      - name: Find the previous review comment
+        id: prev
+        run: |
+          # Only our own comment counts: the marker plus the bot as author.
+          gh api --paginate "repos/$REPO/issues/$PR/comments" \
+            --jq '.[] | select(.user.login == "github-actions[bot]" and (.body | contains("<!-- tf-blast-radius "))) | {id, body}' \
+            | jq -s 'last // {}' > prev.json
+          jq -r '.body // ""' prev.json > prev.md
+          echo "id=$(jq -r '.id // empty' prev.json)" >> "$GITHUB_OUTPUT"
+      - name: Render and post the review
+        if: needs.agent.result == 'success'
+        env:
+          PREV_ID: ${{ steps.prev.outputs.id }}
+        run: |
+          set +e
+          python3 .github/scripts/render-review.py render \
+            --result review/result.json --gather gather/gather.json --prev prev.md \
+            --repo-root . --repo "$REPO" --sha "$SHA" --run-url "$RUN_URL" --out comment.md
+          RC=$?
+          set -e
+          [ "$RC" -eq 0 ] || [ "$RC" -eq 3 ] || exit "$RC"
+          if [ -n "$PREV_ID" ]; then
+            gh api -X PATCH "repos/$REPO/issues/comments/$PREV_ID" -F body=@comment.md > /dev/null
+          else
+            gh pr comment "$PR" --repo "$REPO" --body-file comment.md
+          fi
+          if [ "$RC" -eq 3 ]; then
+            echo "::error::Risk checks or the evidence check failed. See the warning in the PR comment."
+            exit 1
+          fi
+      - name: Mark the previous review stale (agent failed)
+        if: needs.agent.result != 'success' && steps.prev.outputs.id != ''
+        env:
+          PREV_ID: ${{ steps.prev.outputs.id }}
+        run: |
+          python3 .github/scripts/render-review.py stale --prev prev.md --sha "$SHA" --run-url "$RUN_URL" --out comment.md
+          gh api -X PATCH "repos/$REPO/issues/comments/$PREV_ID" -F body=@comment.md > /dev/null

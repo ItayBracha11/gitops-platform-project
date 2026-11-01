@@ -43,7 +43,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -lockfile=readonly
 
       - name: Terraform Format Check
         run: terraform fmt -check -recursive

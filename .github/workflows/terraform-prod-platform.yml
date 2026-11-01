@@ -38,7 +38,7 @@ jobs:
 
       - name: Terraform Init (cluster)
         working-directory: infra/environments/prod/cluster
-        run: terraform init
+        run: terraform init -lockfile=readonly
 
       - name: Refresh cluster access CIDR for this runner
         working-directory: infra/environments/prod/cluster
@@ -53,7 +53,7 @@ jobs:
 
       - name: Terraform Init (platform)
         working-directory: infra/environments/prod/platform
-        run: terraform init
+        run: terraform init -lockfile=readonly
 
       - name: Terraform Validate (platform)
         working-directory: infra/environments/prod/platform
