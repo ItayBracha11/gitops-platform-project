@@ -179,7 +179,9 @@ claude -p "/tf-blast-radius gather/" \
 A tag-only PR stops after step 1. That variation is the loop.
 
 ### Output schema
-`verdict`, `summary`, `findings[{resource, action, risk, why, impacts[{affected, how, evidence[]}]}]`, `untraced[{item, reason}]`, `not_planned_roots[{root, reason}]`
+`verdict`, `dangers[{risk, text}]`, `summary`, `findings[{resource, action, risk, why, impacts[{affected, how, evidence[]}]}]`, `next_steps[]`, `untraced[{item, reason}]`, `not_planned_roots[{root, reason}]`
+
+- `dangers`: one plain sentence per thing that breaks, shown in bold at the top of the comment. `next_steps`: the suggested course of action (fixes in the PR, apply order, maintenance window, backups), advice only. Both were added during the evals, when a reviewer couldn't see the danger at a glance.
 
 - File: `.github/claude/blast-radius-schema.json`. Every object sets `additionalProperties: false`.
 - `evidence` is a list with one `path:line` (or `path:start-end`) per entry, so publish can check each one. In early local runs the agent joined several paths into one string.
@@ -198,14 +200,15 @@ A tag-only PR stops after step 1. That variation is the loop.
 - **Risk checks** (no LLM, they flag and never override):
   - the verdict is below its highest finding;
   - the verdict is `low` while the hard gate counted deletes or replaces;
-  - the verdict is `low` while a prod root changed.
+  - the verdict is `low` while a prod root changed;
+  - the verdict is below its highest danger, or it's medium/high with no danger listed.
   - Any of these appears as a warning box at the top of the comment, and the check goes red.
 - **One comment per PR,** edited on re-runs. A hidden marker stores the last commit, verdict and per-risk counts. The re-run note is one line: what changed, or "no change". On the same commit, it notes that differences come from the agent.
 - **Failed re-run:** the existing comment gets one line, "latest run on X failed; the review below is for Y".
 - **Agent text is data:** `<` and `>` are escaped (no HTML, no fake markers) and `@mentions` are broken. The previous comment is only read from `github-actions[bot]`.
-- **Layout, for a human skim:** a colored verdict header (🔴 🟡 🟢) and one status line (mode, hard-gate count, evidence, commit), then the summary.
+- **Layout, for a human skim:** a colored verdict header (🔴 🟡 🟢), the dangers in bold, one plain-words status line (what the review is based on, the hard-gate count, evidence, commit), then the summary.
   - "What else breaks": findings with consumers, highest risk first, with evidence in small print under each impact.
-  - Findings with no consumers go in one table; untraced and not-planned items are collapsed.
+  - Findings with no consumers go in one table, then the suggested next steps; untraced and not-planned items are collapsed under "Limits of this review".
   - Agent text is escaped, so it can't add links, images, emphasis or headings.
 
 ### Files
@@ -352,7 +355,7 @@ Open an issue labeled `ci-failure` with the report and a link to the failed run 
 - [x] Local iteration: `claude -p` against gather outputs (PR #2's real artifact and a synthetic AZ change). The example trace with a real plan runs as the smoke test at the dev-up stop.
 - [x] Schema and CI settings
 - [x] Workflow
-- [ ] Eval PRs pass the acceptance criteria
+- [x] Eval PRs pass the acceptance criteria (21/21 runs, PRs #4–#10)
 
 ### Phase 2: Agent B (branch `agent-b-failure-investigator`). Starts only after Phase 1 is accepted
 - [ ] Log artifacts in every destroy and apply job

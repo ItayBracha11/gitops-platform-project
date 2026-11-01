@@ -2,15 +2,12 @@
 
 What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-ci.md).
 
-## 🛑 Next to be done: the dev-up stop point (then step 6, evals)
-- **What:** one session with dev up:
-  1. You bring dev up.
-  2. One smoke-test PR (a real plan, the doc's VPC CIDR example).
-  3. The eval batch: 7 PRs × 3 runs.
-  4. You destroy dev.
-- **Why now:** everything left to prove needs real plans: the gather job's planned path, tracing from a plan, and the evals. One apply/destroy covers all of it.
-- **Cost:** about $0.30/hour of AWS for a few hours, plus ~22 agent runs on your subscription (about $0.25–0.70 each at API prices).
-- **Done when:** the smoke test posts a correct planned review, the evals have run, and dev is destroyed.
+## ⏭ Next to be done: step 7, acceptance (your call)
+- **Where we are:** every eval passed (step 6). Agent A is ready for acceptance.
+- **Left to do, both yours to decide:**
+  1. Close the eval PRs #4–#10 without merging. I'll do it once you OK it.
+  2. Merge `agent-a-blast-radius` into `main`, and decide on `[skip ci]`: a merge to `main` runs the dev and prod applies.
+- **Then:** Agent B (the failure investigator), on its own branch.
 
 ---
 
@@ -48,7 +45,7 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - **Why:** the agent gets evidence, never AWS credentials.
 - **Safety:** plan files with full values are deleted right after use; only the masked text is kept.
 - **Proof:** test PR #2 (closed, not merged). Dev was down, so nothing was planned, and the correct reason was recorded for each root.
-- **Not proven yet:** the path with real plans. It needs dev up and is covered in step 6.
+- **Real plans:** proven in step 6. Evals 1–5 planned the dev network and cluster roots on a live dev.
 
 ### 2. Skill ✅ Done
 - **What:** `.claude/skills/tf-blast-radius/`:
@@ -113,18 +110,33 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - **Fixed along the way:**
   - The agent searched outside the repo and gave up. The skill now says to stay inside and retry.
   - CI ran Sonnet by default, so Opus is now pinned (your choice).
-- **Not proven in CI:** the stale line after a failed run (tested only locally) and the planned path (dev up).
+- **Not proven in CI:** the stale line after a failed run (tested only locally).
 
-### 6. Evals ⏭ Next to be done (starts with the dev-up stop)
-- 🛑 **Dev-up stop point (agreed): right after step 5.** One session:
-  1. Bring dev up.
-  2. One smoke-test PR proves the gather planned path, the agent in CI, and publish.
-  3. The eval batch: 7 test PRs, 3 runs each.
-  4. Destroy dev.
-- Why one stop: everything that needs dev is tested in a single apply/destroy (about $0.30/hour of AWS).
+### 6. Evals ✅ Done
+- **What:** 7 eval PRs (#4–#10), 3 runs each = 21 runs.
+  - Run 1 in CI.
+  - Runs 2 and 3 locally on the same saved evidence, so any difference comes only from the agent.
+  - Dev was up for evals 1–6 and torn down for eval 7.
+- **Result: every acceptance check passes.**
+  - Expected verdict: 21/21.
+  - Expected impacts and behavior: 21/21. That covers the values file and ALB app, the subnet tags and hardcoded workflow names, the injection reported, and the "couldn't plan" reasons.
+  - Evidence: 225/225 citations verified; no risk-check warnings.
+  - Different paths for different PRs: the tag PR made 7–8 tool calls and stopped, the cluster rename 16–20.
+  - No AWS credentials and no write token in the agent job (checked in the CI log).
+- **Also proven:**
+  - The gather job's planned path on a live dev, including the first real cluster plan.
+  - The diff-only path when dev is torn down. Eval 7 still reached the same verdict as eval 1.
+- **Same PR, same answer?** The verdict and main impacts repeat; the path and wording vary. That's expected from an agent, and it's why each eval runs 3 times.
+- **Changed during the evals (your requests):**
+  - A cleaner comment: a colored verdict, a plain-words status line, details with evidence in small print, one table for the changes nothing depends on.
+  - Bold danger lines at the top and suggested next steps at the end. These are two new answer fields.
+  - The skill changed, so round 1 was re-run and every result comes from the final version.
+- **Worth watching:** eval 3 lists two in-module notes as impacts (the route still uses one NAT gateway). It did so in all 3 runs, and it's defensible.
+- **Cost:** about $6 of subscription usage at API prices for the 21 runs, plus about $2.60 for runs replaced along the way.
+- **Where:** results and scripts are in `.evals/`, kept out of git.
 
-### 7. Acceptance ⬜ To do
-- Every eval gets the expected verdict. Then merging to `main` is your call.
+### 7. Acceptance ⏭ Next to be done
+- Every eval passed. Merging to `main` is your call (see the top of this file).
 
 ---
 
@@ -141,6 +153,8 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - v1 is replaced, not kept.
 - The gather job diffs against the PR's own base, not `main`.
 - Tracing: follow the value through pass-throughs, one hop past where it builds something new.
+- Evals: run 1 in CI, runs 2 and 3 locally on the saved evidence (less time with dev up).
+- The PR comment leads with what breaks and ends with suggested next steps.
 
 ## Later
 - Approval gate on the prod apply workflow.
@@ -148,3 +162,4 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - Move off the subscription token once there's API credit.
 - Agent runs longer than ~9 min need a refreshed token for federation.
 - Decide on `[skip ci]` for the final merge to `main`, which otherwise triggers the dev and prod applies.
+- Decide whether to commit the eval scripts. They're in `.evals/` and kept out of git because they hold the expected answers, which the agent must never see.
