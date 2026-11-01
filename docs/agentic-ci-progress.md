@@ -28,7 +28,7 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
   - **Why:** the plan job needs to read dev; nothing else gets the role.
 - **Claude:** federation set up and tested; it's trusted only for the `agent-review` environment.
   - For now the job uses your subscription token, because there's no API credit.
-  - Guards: the agent can't read `/proc`, and output containing `sk-ant-` is blocked.
+  - Guards: the agent can't read `/proc`, and output containing a real Anthropic key or token, or this run's token, is blocked.
   - **Why:** no stored API key. One environment = one identity.
 - **The v1 reviewer runs end to end:** plan → Claude review → PR comment.
 

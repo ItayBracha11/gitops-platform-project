@@ -190,7 +190,7 @@ A tag-only PR stops after step 1. That variation is the loop.
 ### Agent job limits and outputs
 - `--model claude-opus-5-5`, pinned. Unpinned, CI ran Sonnet by default while every local test used Opus, so evals wouldn't be measuring the tested setup.
 - `--max-turns 25` and `--max-budget-usd 2.00` (about 3× the heaviest local run). The step fails unless the run ends with `subtype: success` and a structured answer.
-- The session transcript is copied from `~/.claude/projects/**/<session_id>.jsonl` and uploaded with `result.json`. A leak guard first blocks any output containing `sk-ant-`.
+- The session transcript is copied from `~/.claude/projects/**/<session_id>.jsonl` and uploaded with `result.json`. A leak guard first blocks any output containing something shaped like an Anthropic key or token (`sk-ant-api03-…`, `sk-ant-oat01-…`) or this run's own token. It doesn't match the bare prefix: the merge PR (#11) failed that way, because its diff contains this doc and the guard's own line.
 
 ### Publish job
 `.github/scripts/render-review.py`. It's deterministic and the only job that writes (`pull-requests: write`).
@@ -389,7 +389,7 @@ Instructions for the coding agent:
 
 **Known gaps:**
 - **Subscription token instead of federation.** There's no API credit, so the agent job uses a Claude subscription token (`CLAUDE_CODE_OAUTH_TOKEN`, a `agent-review` environment secret). It lasts a year, which breaks "no stored keys".
-  - Guards: the agent is denied `Read(//proc/**)`, and the job fails before uploading or posting any output that contains `sk-ant-`.
+  - Guards: the agent is denied `Read(//proc/**)`, and the job fails before uploading or posting any output that contains a real Anthropic key or token, or the run's own token.
   - Fix: add API credit and delete the secret. The token outranks the federation variables, so once it's gone the job uses federation automatically.
 - GitHub-hosted runners don't restrict egress (Agent B, decision 2).
 - The eval sets are small (5–7 cases). They give a direction, not statistics.
