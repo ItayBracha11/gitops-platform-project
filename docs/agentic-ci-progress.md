@@ -2,12 +2,9 @@
 
 What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-ci.md).
 
-## ⏭ Next to be done: step 7, acceptance (your call)
-- **Where we are:** every eval passed (step 6). Agent A is ready for acceptance.
-- **Left to do, both yours to decide:**
-  1. Close the eval PRs #4–#10 without merging. I'll do it once you OK it.
-  2. Merge `agent-a-blast-radius` into `main`, and decide on `[skip ci]`: a merge to `main` runs the dev and prod applies.
-- **Then:** Agent B (the failure investigator), on its own branch.
+## ⏭ Next to be done: Agent B, the failure investigator
+- **Where we are:** Agent A is live on `main` (merged in PR #11). Every infra PR into `main` now gets a blast-radius review.
+- **Next:** Agent B, on its own branch, step by step as with Agent A (design doc, Section 6).
 
 ---
 
@@ -110,7 +107,7 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - **Fixed along the way:**
   - The agent searched outside the repo and gave up. The skill now says to stay inside and retry.
   - CI ran Sonnet by default, so Opus is now pinned (your choice).
-- **Not proven in CI:** the stale line after a failed run (tested only locally).
+- **Stale line in CI:** proven later on PR #7, by forcing an agent failure (1-turn limit) on that branch only.
 
 ### 6. Evals ✅ Done
 - **What:** 7 eval PRs (#4–#10), 3 runs each = 21 runs.
@@ -135,16 +132,17 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - **Cost:** about $6 of subscription usage at API prices for the 21 runs, plus about $2.60 for runs replaced along the way.
 - **Where:** results and scripts are in `.evals/`, kept out of git.
 
-### 7. Acceptance ⏭ Next to be done
-- Every eval passed. Merging to `main` is your call (see the top of this file).
+### 7. Acceptance ✅ Done
+- **Merged into `main`** with a merge commit marked `[skip ci]` (PR #11), so the merge started no dev or prod apply.
+- **Agent A reviewed its own merge PR.** Its first run was blocked by the leak guard: a false positive on the text `sk-ant-` in the workflow and docs inside the diff. The guard now matches only the shape of a real key or token, plus the run's own token.
+- **Prod approval gate added:** Prod Apply and Prod Destroy wait for a required reviewer on the `prod` environment, and only `main` can deploy to it. Tested: a run from another branch was rejected before any step ran.
+- **Cleanup:** eval PRs #4–#10 closed without merging; every work branch deleted. Only `main` is left.
 
 ---
 
 ## Branches
-- `agentic-pipeline`: v1 reviewer, lock files, Claude access.
-- `agentic-foundation`: Phase 0 + docs.
-- `agent-a-blast-radius`: Agent A work. **Current branch.**
-- Nothing merges to `main` until Agent A passes step 7. I ask before every merge.
+- `main` only. The Agent A branches (`agentic-pipeline`, `agentic-foundation`, `agent-a-blast-radius`) were merged and deleted.
+- Agent B gets its own branch. I ask before every merge.
 
 ## Decisions made
 - One skill for all roots.
@@ -157,9 +155,7 @@ What we've built, why, and what comes next. Full spec: [agentic-ci.md](agentic-c
 - The PR comment leads with what breaks and ends with suggested next steps.
 
 ## Later
-- Approval gate on the prod apply workflow.
 - Tighten `tf-plan-reader` further, to only what a dev plan reads.
 - Move off the subscription token once there's API credit.
 - Agent runs longer than ~9 min need a refreshed token for federation.
-- Decide on `[skip ci]` for the final merge to `main`, which otherwise triggers the dev and prod applies.
 - Decide whether to commit the eval scripts. They're in `.evals/` and kept out of git because they hold the expected answers, which the agent must never see.
